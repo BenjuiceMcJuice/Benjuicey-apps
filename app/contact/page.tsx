@@ -81,18 +81,6 @@ export default function Contact() {
           </button>
         </form>
 
-        <p className="form-note retro-font">
-          to receive form submissions, set up a free{' '}
-          <a
-            href="https://formspree.io"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: 'var(--color-dark)', borderBottom: '2px solid currentColor' }}
-          >
-            Formspree
-          </a>{' '}
-          account and replace <code style={{ fontFamily: 'monospace', fontSize: '15px' }}>YOUR_FORM_ID</code> in the code.
-        </p>
       </div>
     </main>
   )
