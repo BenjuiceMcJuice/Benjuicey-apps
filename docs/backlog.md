@@ -97,7 +97,7 @@ submissions/{ref}
 **Goal:** Replace all placeholder content with real apps and links.
 
 **Tasks:**
-- [ ] Finalise trigram list for all existing apps
+- [x] Finalise trigram list for all existing apps — see `docs/trigrams.md`
 - [ ] Fill in `data/categories.ts` with real apps, descriptions, URLs
 - [ ] Decide on final categories
 - [ ] Add real Buy Me a Coffee link in `components/Nav.tsx`

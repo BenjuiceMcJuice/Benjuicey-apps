@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // All access goes through the Cloudflare Worker (service account).
+    // The service account bypasses these rules, so denying everything here
+    // ensures no client-side SDK can read or write the database directly.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,4 +1,61 @@
+'use client'
+
+import { useState } from 'react'
+
+type Status = 'idle' | 'submitting' | 'success' | 'error'
+
 export default function Contact() {
+  const [status, setStatus] = useState<Status>('idle')
+  const [ref, setRef] = useState('')
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setStatus('submitting')
+
+    const form = e.currentTarget
+    const data = {
+      appId: 'portfolio',
+      name: (form.elements.namedItem('name') as HTMLInputElement).value,
+      email: (form.elements.namedItem('email') as HTMLInputElement).value,
+      type: (form.elements.namedItem('type') as HTMLSelectElement).value,
+      message: (form.elements.namedItem('message') as HTMLTextAreaElement).value,
+    }
+
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_FEEDBACK_API_URL}/submit`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        },
+      )
+      const json = (await res.json()) as { success?: boolean; ref?: string }
+      if (res.ok && json.success) {
+        setRef(json.ref ?? '')
+        setStatus('success')
+      } else {
+        setStatus('error')
+      }
+    } catch {
+      setStatus('error')
+    }
+  }
+
+  if (status === 'success') {
+    return (
+      <main className="page-wrapper">
+        <div className="hero pixel-box">
+          <h1 className="hero-title pixel-font">got it!</h1>
+          <p className="hero-sub retro-font">
+            your message has been logged as <strong>{ref}</strong>.<br />
+            i&apos;ll take a look and get back to you if needed.
+          </p>
+        </div>
+      </main>
+    )
+  }
+
   return (
     <main className="page-wrapper">
       <div className="hero pixel-box">
@@ -10,18 +67,7 @@ export default function Contact() {
       </div>
 
       <div className="contact-form-wrapper">
-        {/*
-          Replace the action URL with your own endpoint.
-          Easy options:
-            - Formspree: https://formspree.io  (free tier available)
-            - Resend:    https://resend.com
-          Example Formspree action: "https://formspree.io/f/YOUR_FORM_ID"
-        */}
-        <form
-          className="contact-form pixel-box"
-          action="https://formspree.io/f/mdavveyq"
-          method="POST"
-        >
+        <form className="contact-form pixel-box" onSubmit={handleSubmit}>
           <div className="form-field">
             <label className="form-label pixel-font" htmlFor="name">
               YOUR NAME
@@ -76,11 +122,20 @@ export default function Contact() {
             />
           </div>
 
-          <button className="form-submit" type="submit">
-            SEND IT →
+          {status === 'error' && (
+            <p className="retro-font" style={{ color: 'red', fontSize: '0.9rem' }}>
+              something went wrong — try again in a moment.
+            </p>
+          )}
+
+          <button
+            className="form-submit"
+            type="submit"
+            disabled={status === 'submitting'}
+          >
+            {status === 'submitting' ? 'SENDING...' : 'SEND IT →'}
           </button>
         </form>
-
       </div>
     </main>
   )
