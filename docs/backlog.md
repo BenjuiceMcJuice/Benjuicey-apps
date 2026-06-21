@@ -13,18 +13,18 @@ Turn this portfolio site into a centralised platform: public-facing app director
 **Goal:** One Cloudflare Worker endpoint that every app can POST feedback to. Replaces Formspree.
 
 **Tasks:**
-- [ ] Set up Firestore project and collection schema (see below)
-- [ ] Assign a trigram to each app (e.g. `BEJ` = portfolio, `GAM` = game, `TOL` = tool)
-- [ ] Build Cloudflare Worker to handle form submissions
-  - Accept `appId` and map it to the app's trigram
-  - Generate sequential per-app ref IDs (`BEJ-0001`, `GAM-0001`, etc.)
-  - Write submission to Firestore
-  - Send confirmation email to user (ref in subject line e.g. `[BEJ-0042] Request received`)
-  - Return success/error response
-- [ ] Add CORS headers so any app can call the Worker
+- [x] Set up Firestore project and collection schema
+- [x] Assign a trigram to each app — see `docs/trigrams.md`
+- [x] Build Cloudflare Worker to handle form submissions
+  - [x] Accept `appId` and map it to the app's trigram
+  - [x] Generate sequential per-app ref IDs (`BEJ-0001`, etc.)
+  - [x] Write submission to Firestore (atomic transaction)
+  - [ ] Send confirmation email to user — skipped for now, needs verified Resend domain
+  - [x] Return success/error response
+- [x] Add CORS headers so any app can call the Worker
 - [ ] Add basic rate limiting to prevent spam
-- [ ] Update portfolio contact form to POST to Worker instead of Formspree
-- [ ] Test end-to-end: submit → Firestore → confirmation email
+- [x] Update portfolio contact form to POST to Worker instead of Formspree
+- [x] Test end-to-end: submit → Firestore ✓ (email skipped)
 
 **Firestore schema:**
 ```
@@ -48,15 +48,12 @@ submissions/{ref}
 **Goal:** Private page on this site to view and manage all submissions across every app.
 
 **Tasks:**
-- [ ] Create `/admin` route (protected — password or magic link auth)
-- [ ] Submissions table view
-  - Filter by app/trigram, type, status
-  - Sort by date, app, type
-  - Search by keyword
-- [ ] Single submission view — update status, add internal notes, change type/tag
-- [ ] Stats panel — open count by app, fault vs request split, submissions over time
+- [x] Create `/admin` route (password protected)
+- [x] Submissions table view — filter by status and app
+- [x] Single submission view — update status, add internal notes
+- [x] Stats panel — total, open, in-progress, done counts
 - [ ] AI Analysis button (see Epic 4)
-- [ ] Move hosting from GitHub Pages to Cloudflare Pages (required for server-side admin routes)
+- [x] Move hosting to Cloudflare Pages — done, auto-deploys from main
 
 ---
 
@@ -98,9 +95,9 @@ submissions/{ref}
 
 **Tasks:**
 - [x] Finalise trigram list for all existing apps — see `docs/trigrams.md`
-- [ ] Fill in `data/categories.ts` with real apps, descriptions, URLs
-- [ ] Decide on final categories
-- [ ] Add real Buy Me a Coffee link in `components/Nav.tsx`
+- [x] Fill in `data/categories.ts` with real apps, descriptions, URLs
+- [x] Decide on final categories (Health & Training, Actually Useful, Games & Fun)
+- [ ] Add real Buy Me a Coffee link in `components/Nav.tsx` — needs buymeacoffee.com/benjuicey account
 - [ ] Review copy on home and contact pages
 
 ---
@@ -114,7 +111,7 @@ submissions/{ref}
 | Feedback API | Cloudflare Worker |
 | Database | Firestore |
 | Email | Resend (or Cloudflare Email Workers) |
-| Auth (admin) | TBD — magic link or simple password |
+| Auth (admin) | Password (ADMIN_PASSWORD secret in Cloudflare Worker) |
 | AI Analysis | Claude API (called from admin dashboard on demand) |
 
 ---
