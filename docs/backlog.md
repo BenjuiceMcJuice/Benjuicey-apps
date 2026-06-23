@@ -39,6 +39,7 @@ submissions/{ref}
   message:    string
   timestamp:  datetime
   notes:      string   // internal notes, not visible to submitter
+  notify:     boolean  // whether to email submitter on status changes
 ```
 
 ---

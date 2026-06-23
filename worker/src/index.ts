@@ -1,6 +1,6 @@
 import { getAccessToken } from './auth'
 import { createSubmission, listSubmissions, updateSubmission } from './firestore'
-import { sendConfirmation } from './email'
+import { sendStatusUpdate } from './email'
 import { getTrigram, APP_NAMES } from './trigrams'
 
 export interface Env {
@@ -60,12 +60,8 @@ export default {
         const ref = await createSubmission(env.FIRESTORE_PROJECT_ID, token, trigram, {
           appId, trigram, type: type ?? 'general', status: 'open',
           name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
-          timestamp: new Date(), notes: '',
+          timestamp: new Date(), notes: '', notify: false,
         })
-
-        if (email?.trim()) {
-          await sendConfirmation(env.RESEND_API_KEY, email.trim(), name.trim(), ref, APP_NAMES[appId] ?? appId)
-        }
 
         return new Response(JSON.stringify({ success: true, ref }), {
           status: 200, headers: { ...cors, 'Content-Type': 'application/json' },
@@ -107,9 +103,15 @@ export default {
     if (request.method === 'PATCH' && url.pathname.startsWith('/admin/submissions/')) {
       try {
         const ref = url.pathname.split('/').pop()!
-        const updates = (await request.json()) as { status?: string; notes?: string }
+        const body = (await request.json()) as {
+          status?: string; notes?: string; notify?: boolean; email?: string; name?: string
+        }
+        const { email, name, ...updates } = body
         const token = await authToken(env)
         await updateSubmission(env.FIRESTORE_PROJECT_ID, token, ref, updates)
+        if (updates.status && updates.notify && email) {
+          await sendStatusUpdate(env.RESEND_API_KEY, email, name ?? 'there', ref, updates.status)
+        }
         return new Response(JSON.stringify({ success: true }), {
           status: 200, headers: { ...cors, 'Content-Type': 'application/json' },
         })

@@ -108,12 +108,13 @@ export async function updateSubmission(
   projectId: string,
   token: string,
   ref: string,
-  updates: { status?: string; notes?: string },
+  updates: { status?: string; notes?: string; notify?: boolean },
 ): Promise<void> {
   const fields: string[] = []
   const docFields: Record<string, unknown> = {}
   if (updates.status !== undefined) { fields.push('status'); docFields.status = { stringValue: updates.status } }
   if (updates.notes !== undefined) { fields.push('notes'); docFields.notes = { stringValue: updates.notes } }
+  if (updates.notify !== undefined) { fields.push('notify'); docFields.notify = { booleanValue: updates.notify } }
   if (fields.length === 0) return
 
   const mask = fields.map(f => `updateMask.fieldPaths=${f}`).join('&')

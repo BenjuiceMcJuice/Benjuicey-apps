@@ -15,6 +15,7 @@ interface Submission {
   message: string
   timestamp: string
   notes: string
+  notify: boolean
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -78,12 +79,23 @@ export default function Admin() {
 
   async function updateStatus(ref: string, status: string) {
     const pw = sessionStorage.getItem('admin-pw')!
+    const sub = submissions.find(s => s.ref === ref)!
     await fetch(`${API}/admin/submissions/${ref}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, notify: sub.notify ?? false, email: sub.email, name: sub.name }),
     })
-    setSubmissions(s => s.map(sub => sub.ref === ref ? { ...sub, status } : sub))
+    setSubmissions(s => s.map(s2 => s2.ref === ref ? { ...s2, status } : s2))
+  }
+
+  async function updateNotify(ref: string, notify: boolean) {
+    const pw = sessionStorage.getItem('admin-pw')!
+    await fetch(`${API}/admin/submissions/${ref}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
+      body: JSON.stringify({ notify }),
+    })
+    setSubmissions(s => s.map(s2 => s2.ref === ref ? { ...s2, notify } : s2))
   }
 
   async function saveNotes(ref: string) {
@@ -266,6 +278,16 @@ export default function Admin() {
                     >
                       {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
+                    {sub.email && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={sub.notify ?? false}
+                          onChange={e => updateNotify(sub.ref, e.target.checked)}
+                        />
+                        <span className="retro-font" style={{ fontSize: 16 }}>notify on updates</span>
+                      </label>
+                    )}
                   </div>
                   <div style={{ flex: 1, minWidth: 200 }}>
                     <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>INTERNAL NOTES</div>
