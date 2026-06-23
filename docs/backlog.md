@@ -13,18 +13,16 @@ Turn this portfolio site into a centralised platform: public-facing app director
 **Goal:** One Cloudflare Worker endpoint that every app can POST feedback to. Replaces Formspree.
 
 **Tasks:**
-- [ ] Set up Firestore project and collection schema (see below)
-- [ ] Assign a trigram to each app (e.g. `BEJ` = portfolio, `GAM` = game, `TOL` = tool)
-- [ ] Build Cloudflare Worker to handle form submissions
+- [x] Set up Firestore project and collection schema (see below)
+- [x] Assign a trigram to each app (e.g. `BEJ` = portfolio, `GAM` = game, `TOL` = tool)
+- [x] Build Cloudflare Worker to handle form submissions
   - Accept `appId` and map it to the app's trigram
   - Generate sequential per-app ref IDs (`BEJ-0001`, `GAM-0001`, etc.)
   - Write submission to Firestore
-  - Send confirmation email to user (ref in subject line e.g. `[BEJ-0042] Request received`)
+  - Email submitter on status change if notify toggle is enabled (per-submission)
   - Return success/error response
-- [ ] Add CORS headers so any app can call the Worker
-- [ ] Add basic rate limiting to prevent spam
-- [ ] Update portfolio contact form to POST to Worker instead of Formspree
-- [ ] Test end-to-end: submit → Firestore → confirmation email
+- [x] Add CORS headers so any app can call the Worker
+- [x] Update portfolio contact form to POST to Worker instead of Formspree
 
 **Firestore schema:**
 ```
