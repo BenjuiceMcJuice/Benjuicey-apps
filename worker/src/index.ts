@@ -2,6 +2,7 @@ import { getAccessToken } from './auth'
 import { createSubmission, listSubmissions, updateSubmission } from './firestore'
 import { sendConfirmation } from './email'
 import { getTrigram, APP_NAMES } from './trigrams'
+import { WIDGET_JS } from './widget'
 
 export interface Env {
   GOOGLE_SERVICE_ACCOUNT_JSON: string
@@ -33,6 +34,20 @@ export default {
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: cors })
+    }
+
+    // ── GET /widget.js ──────────────────────────────────────────────
+    // Public embeddable script — any app's origin may load it, so this
+    // isn't gated by ALLOWED_ORIGINS the way fetch()/XHR calls are.
+    if (request.method === 'GET' && url.pathname === '/widget.js') {
+      return new Response(WIDGET_JS, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/javascript; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=300',
+        },
+      })
     }
 
     // ── POST /submit ──────────────────────────────────────────────

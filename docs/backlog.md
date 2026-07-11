@@ -62,12 +62,13 @@ submissions/{ref}
 **Goal:** A reusable component any app can drop in to collect feedback without building its own form.
 
 **Tasks:**
-- [ ] Build a small JS widget (modal with form — name, email, type, message)
-- [ ] Widget accepts an `appId` param to tag submissions with the correct trigram
-- [ ] Standardised form fields across all apps so data is consistent
-- [ ] Host widget script so other apps can load it via a `<script>` tag
-- [ ] Test embed in at least one other app
-- [ ] Optional: floating feedback button style (sits in corner of host app)
+- [x] Build a small JS widget (modal with form — name, email, type, message)
+- [x] Widget accepts an `appId` param (via `data-app-id`) to tag submissions with the correct trigram
+- [x] Standardised form fields across all apps so data is consistent
+- [x] Host widget script so other apps can load it via a `<script>` tag — served at `GET /widget.js` on the Worker itself
+- [x] Test embed in at least one other app — Whatadisaster, 2026-07-11
+- [x] Floating feedback button style built in, themeable via `data-accent`; `data-no-button` to suppress it for apps with their own trigger
+- [ ] Migrate `ai-literate`'s hand-rolled modal to the shared widget for consistency (currently the only app with a bespoke implementation)
 
 ---
 

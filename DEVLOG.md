@@ -42,5 +42,14 @@
 - Next.js 14.2.30 has a flagged security vulnerability — upgrade when convenient
 
 ### What's next
-- **Embeddable widget** — JS snippet other apps drop in to feed submissions to the Worker
 - **AI analysis** — Claude API button in admin to analyse patterns across all submissions
+
+## 2026-07-11 — Embeddable feedback widget
+
+Whatadisaster had drifted: it had built its own standalone Firebase project + Firestore `feedback` collection instead of using this platform's Worker, because the "embeddable widget" piece didn't exist yet to make that easy. Built it now and used it to bring Whatadisaster in line — same pattern applies to any future app.
+
+- New `GET /widget.js` route on the Worker (`worker/src/widget.ts`) — self-contained, themeable script. Reads `data-app-id` (required), `data-accent` (hex, optional), `data-position` (`br`/`bl`), `data-no-button` (suppress the built-in floating button if the host app wants to trigger it itself via `window.BenjuiceyFeedback.open()`).
+- Same field contract as `ai-literate`'s hand-rolled modal (name, email optional, type, message) so submissions stay uniform across apps.
+- Dispatches a `benjuiceyfeedback:submitted` window event with `{appId, ref, type}` on success, so host apps can hook their own analytics without needing a callback API.
+- Added `whatadisaster.uk` / `whatadisaster.pages.dev` to `wrangler.toml` `ALLOWED_ORIGINS`.
+- `ai-literate` still runs its own hand-rolled modal — could migrate it to `/widget.js` later for consistency, not done yet.
