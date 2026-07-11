@@ -3,6 +3,8 @@
 **This is the single source of truth for how feedback works across every app Ben builds.**
 Every app's own DEVLOG links back here. If you're adding feedback to an app, follow this — don't invent a new mechanism.
 
+> **Companion doc:** [`feedback-how-it-works.md`](feedback-how-it-works.md) explains the end-to-end flow (what happens on submit, the database writes, emails) and how to review/triage submissions — including having Claude categorise new feedback. This doc is the *standard*; that one is *how it works*.
+
 ---
 
 ## The principle

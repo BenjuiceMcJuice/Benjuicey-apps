@@ -56,6 +56,6 @@ Whatadisaster had drifted: it had built its own standalone Firebase project + Fi
 
 ### Feedback standard (2026-07-11)
 
-Wrote the canonical cross-app standard: **[`docs/feedback-standard.md`](docs/feedback-standard.md)** — the single source of truth every app's DEVLOG points back to. It defines the uniform schema, the canonical `type` categories (`bug`/`content`/`request`/`general`), the `appId`→trigram stamping, and the rule that the **portfolio's own feedback is generic** (`appId: 'portfolio'` → `BEJ`).
+Wrote the canonical cross-app standard: **[`docs/feedback-standard.md`](docs/feedback-standard.md)** — the single source of truth every app's DEVLOG points back to. It defines the uniform schema, the canonical `type` categories (`bug`/`content`/`request`/`general`), the `appId`→trigram stamping, and the rule that the **portfolio's own feedback is generic** (`appId: 'portfolio'` → `BEJ`). Companion doc **[`docs/feedback-how-it-works.md`](docs/feedback-how-it-works.md)** explains the end-to-end flow (submit → ref → Firestore writes → email status), the data model, how to review via the admin dashboard/API, and the workflow for having Claude categorise/triage new submissions (manually or scheduled).
 
 Aligned the two surfaces that had drifted to non-canonical `type` values: the portfolio `/contact` form (dropped `collab`/`hi`, now `bug`/`content`/`request`/`general`) and `ai-literate`'s modal (`hi` → `general`). The widget was already canonical.
