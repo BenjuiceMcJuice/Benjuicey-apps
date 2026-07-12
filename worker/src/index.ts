@@ -1,6 +1,6 @@
 import { getAccessToken } from './auth'
 import { createSubmission, listSubmissions, updateSubmission } from './firestore'
-import { sendConfirmation } from './email'
+import { sendConfirmation, sendAdminNotification } from './email'
 import { getTrigram, APP_NAMES } from './trigrams'
 import { WIDGET_JS } from './widget'
 
@@ -10,6 +10,7 @@ export interface Env {
   FIRESTORE_PROJECT_ID: string
   ALLOWED_ORIGINS: string
   ADMIN_PASSWORD: string
+  ADMIN_EMAIL: string
 }
 
 function corsHeaders(origin: string, allowedOriginsEnv: string): HeadersInit {
@@ -78,8 +79,18 @@ export default {
           timestamp: new Date(), notes: '',
         })
 
-        if (email?.trim()) {
-          await sendConfirmation(env.RESEND_API_KEY, email.trim(), name.trim(), ref, APP_NAMES[appId] ?? appId)
+        // Emails are best-effort — a failure here must NOT fail a submission
+        // that has already been written to Firestore.
+        try {
+          await sendAdminNotification(env.RESEND_API_KEY, env.ADMIN_EMAIL, {
+            ref, appName: APP_NAMES[appId] ?? appId, type: type ?? 'general',
+            name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
+          })
+          if (email?.trim()) {
+            await sendConfirmation(env.RESEND_API_KEY, email.trim(), name.trim(), ref, APP_NAMES[appId] ?? appId)
+          }
+        } catch (emailErr) {
+          console.error('email send failed (submission still saved)', emailErr)
         }
 
         return new Response(JSON.stringify({ success: true, ref }), {

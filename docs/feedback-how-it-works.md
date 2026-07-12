@@ -65,11 +65,19 @@ There's also a tiny `counters/{trigram}` document per app that just holds the la
 
 ---
 
-## What does NOT happen (important)
+## Emails & notifications
 
-- **No notification reaches you.** There's no email, Slack ping, or alert when feedback arrives. Feedback silently accumulates in the database until you look. This is by design (cheap, no infra) — and it's exactly why the "ask Claude to categorise new feedback" workflow below exists.
-- **Confirmation emails to the submitter are currently switched off.** The code to email the submitter a "got your message" confirmation exists (`worker/src/email.ts`, via Resend), but it uses a placeholder API key and an unverified sending domain, so the send fails silently (the failure is caught and logged, and never blocks the submission). To turn it on: verify a domain on Resend, set the real `RESEND_API_KEY` secret, and update the `from:` address. Until then, assume no emails go out at all.
+- **Admin notification to Ben on every new submission** (`sendAdminNotification` in `worker/src/email.ts`). On each submit, the Worker emails `ADMIN_EMAIL` (set in `wrangler.toml`) a summary: which app, category, who, and the message. **This only actually sends once a real `RESEND_API_KEY` secret is set** (see "Turning email on" below) — the code is deployed and dormant until then, and an email failure never blocks the submission.
+- **Confirmation email to the submitter** (`sendConfirmation`) — a "got your message, ref WDA-0001" reply, sent only if they left an email. Same dependency on a working Resend key, plus a caveat: sending to *arbitrary* recipients (not just Ben) needs a **verified domain** on Resend, not just the default `onboarding@resend.dev` test sender.
 - **No spam/rate limiting yet.** Anyone can POST to `/submit`. Fine at current volume; if abused, add Cloudflare rate limiting or Turnstile in front of the Worker.
+
+### Turning email on
+
+1. Create a [Resend](https://resend.com) account. **Sign up with the email you want notifications to land in** (e.g. `benjuice.apps@gmail.com`) — in test mode the `onboarding@resend.dev` sender can only deliver to that account's own address, which is why `ADMIN_EMAIL` must match it.
+2. Grab an API key and set it as the Worker secret: `cd worker && npx wrangler secret put RESEND_API_KEY` (paste the key). Redeploy is not needed for a secret change, but harmless.
+3. Admin notifications to yourself now work. To also send **confirmation emails to submitters**, verify a domain on Resend and change the `from:` address in `email.ts` off `onboarding@resend.dev`.
+
+Until step 2 is done, feedback still saves fine — you just read it in the admin dashboard, and the "ask Claude to categorise" workflow below is the way to stay on top of it.
 
 ---
 
