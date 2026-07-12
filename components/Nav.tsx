@@ -22,7 +22,7 @@ export function Nav() {
           href="/contact"
           className={`nav-link retro-font${pathname === '/contact' ? ' active' : ''}`}
         >
-          requests
+          feedback
         </Link>
         <a
           href="https://buymeacoffee.com/benjuicey"

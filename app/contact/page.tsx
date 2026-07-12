@@ -102,10 +102,10 @@ export default function Contact() {
               WHAT&apos;S THIS ABOUT
             </label>
             <select className="form-select" id="type" name="type">
-              <option value="request">i want to request something</option>
               <option value="bug">found a bug</option>
-              <option value="collab">want to collab</option>
-              <option value="hi">just saying hi</option>
+              <option value="content">something&apos;s wrong / unclear</option>
+              <option value="request">i want to request something</option>
+              <option value="general">just saying hi</option>
             </select>
           </div>
 
