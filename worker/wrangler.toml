@@ -5,7 +5,7 @@ compatibility_date = "2024-09-23"
 [vars]
 FIRESTORE_PROJECT_ID = "benjuicey-apps"
 # Update ALLOWED_ORIGINS once your Cloudflare Pages URL is known
-ALLOWED_ORIGINS = "https://benjuicey-apps.pages.dev,http://localhost:3000,https://aisense.pages.dev,https://ai-literate.pages.dev,https://ai-literate.uk,https://www.ai-literate.uk,https://whatadisaster.pages.dev,https://whatadisaster.uk,https://www.whatadisaster.uk"
+ALLOWED_ORIGINS = "https://benjuicey-apps.pages.dev,http://localhost:3000,http://localhost:5173,https://aisense.pages.dev,https://ai-literate.pages.dev,https://ai-literate.uk,https://www.ai-literate.uk,https://whatadisaster.pages.dev,https://whatadisaster.uk,https://www.whatadisaster.uk,https://betalog.co.uk,https://www.betalog.co.uk,https://betalog.pages.dev"
 
 # Set these secrets via the CLI (run once each):
 #   wrangler secret put GOOGLE_SERVICE_ACCOUNT_JSON
