@@ -37,9 +37,10 @@ email. Full write-up: **`docs/feedback-how-it-works.md`**; rules/schema:
   notification in the same `/submit` request — the DB has no triggers of its
   own. The save is the source of truth; the email is best-effort and never
   blocks a saved submission.
-- Notifications: **Formspree** (`FORMSPREE_ENDPOINT` in `wrangler.toml`, no
-  domain/secret needed — the easy path) and/or **Resend** (`RESEND_API_KEY`
-  secret). Either, both, or neither.
+- Notifications: **Resend** (`RESEND_API_KEY` secret — a real `re_…` key turns
+  them on; placeholders are ignored). Formspree was tried and retired — it
+  spam-filters the Worker's server-side POSTs so no email ever fires (see
+  DEVLOG 2026-07-14 session 2). Resend is the supported path.
 - A browser submission only reaches the Worker if the app's origin is in
   `ALLOWED_ORIGINS` (`worker/wrangler.toml`). Add an origin here **only** for a
   live portfolio app — and use its *real* origin (Dungeon of Montor is on

@@ -1,6 +1,6 @@
 import { getAccessToken } from './auth'
 import { createSubmission, listSubmissions, updateSubmission } from './firestore'
-import { sendConfirmation, sendAdminNotification, sendFormspreeNotification } from './email'
+import { sendConfirmation, sendAdminNotification } from './email'
 import { getTrigram, APP_NAMES } from './trigrams'
 import { WIDGET_JS } from './widget'
 
@@ -11,7 +11,6 @@ export interface Env {
   ALLOWED_ORIGINS: string
   ADMIN_PASSWORD: string
   ADMIN_EMAIL: string
-  FORMSPREE_ENDPOINT: string
 }
 
 function corsHeaders(origin: string, allowedOriginsEnv: string): HeadersInit {
@@ -87,10 +86,10 @@ export default {
             ref, appName: APP_NAMES[appId] ?? appId, type: type ?? 'general',
             name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
           }
-          // Two independent admin-notification channels — either, both, or
-          // neither can be configured. Formspree (env var, no domain needed)
-          // is the easy path; Resend (secret) is the richer/HTML path.
-          await sendFormspreeNotification(env.FORMSPREE_ENDPOINT, notify)
+          // Resend is the admin-notification channel: an email API built for
+          // server-side sending, so it doesn't spam-filter our own mail the
+          // way Formspree did (see DEVLOG 2026-07-14 session 2). Dormant until
+          // a real `re_` RESEND_API_KEY secret is set.
           await sendAdminNotification(env.RESEND_API_KEY, env.ADMIN_EMAIL, notify)
           if (email?.trim()) {
             await sendConfirmation(env.RESEND_API_KEY, email.trim(), name.trim(), ref, APP_NAMES[appId] ?? appId)

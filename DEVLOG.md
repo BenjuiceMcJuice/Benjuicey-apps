@@ -101,3 +101,38 @@ Resend is the right shape: an email API *built* for server-side transactional se
 - `FORMSPREE_ENDPOINT` is set (`mdavveyq`) but effectively unusable for notifications due to spam filtering — leave it or blank it when Resend goes in.
 - Notification emails: **not yet delivering** — waiting on the Resend switch above.
 - Still outstanding from before: Dungeon of Montor's `github.io` origin isn't in `ALLOWED_ORIGINS` (the one live app not yet wired for feedback).
+
+## 2026-07-14 (session 3) — Retired Formspree, made Resend the notification path
+
+Acting on session 2's decision. Formspree is the wrong tool for a server-side
+notification fan-out (spam-filters every Cloudflare-origin POST), so rather than
+leave a dead channel firing on every submission, retired it and made Resend the
+single notification path. The Resend code was already present and already gated
+behind a real `re_` key by session 2's `resendKey()` fix, so this session is a
+cleanup + doc pass, not new plumbing.
+
+### Code changes
+- **Removed the Formspree path.** Deleted `sendFormspreeNotification` from
+  `worker/src/email.ts`, its call in `POST /submit`, and the `FORMSPREE_ENDPOINT`
+  field from the `Env` interface (`worker/src/index.ts`). Rationale for the full
+  removal (vs just blanking the var): it only ever delivered to Spam, and the
+  session-2 write-up above + git history preserve the "why" — dead code with a
+  now-misleading "kept for reference" comment is worse than none.
+- **`worker/wrangler.toml`:** removed the `FORMSPREE_ENDPOINT` var and its
+  comment; the `ADMIN_EMAIL` note now points at Resend, with a short breadcrumb
+  explaining why Formspree is gone.
+- **Docs:** `docs/feedback-how-it-works.md` notifications section rewritten to
+  Resend-only (Formspree kept only as a "why not" warning); `CLAUDE.md` feedback
+  bullet updated to name Resend as the path.
+
+### What's left for Ben (only he can do these — no Cloudflare/Resend creds here)
+The code is ready; notifications stay dormant until a real key is set:
+1. Create a Resend account signed up with `benjuice.apps@gmail.com` (must match
+   `ADMIN_EMAIL` — test-mode `onboarding@resend.dev` only delivers to the
+   account owner's own address; **no domain verification** needed for self-notify).
+2. Make an API key (starts `re_`) → `cd worker && npx wrangler secret put RESEND_API_KEY` → paste it.
+3. `npx wrangler deploy`, then submit a test — the admin notification should land
+   with no spam filtering.
+
+Confirmation emails to *other* submitters still need a verified domain (change
+the `from:` off `onboarding@resend.dev` in `email.ts`) — left off for now.
