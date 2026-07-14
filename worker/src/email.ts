@@ -46,21 +46,27 @@ export async function sendFormspreeNotification(
   sub: { ref: string; appName: string; type: string; name: string; email: string; message: string },
 ): Promise<void> {
   if (!endpoint) return // not configured yet — skip silently
+
+  // Formspree treats a field literally named `email` as the reply-to and
+  // VALIDATES it as an address — so only include it when the submitter
+  // actually gave one, otherwise Formspree rejects the whole submission and
+  // no notification is sent (exactly when anonymous feedback comes in). For
+  // anonymous submissions we record the fact in a non-special field instead.
+  const payload: Record<string, unknown> = {
+    _subject: `[${sub.ref}] New ${sub.type} feedback — ${sub.appName}`,
+    ref: sub.ref,
+    app: sub.appName,
+    type: sub.type,
+    name: sub.name,
+    message: sub.message,
+  }
+  if (sub.email) payload.email = sub.email // Formspree uses this as reply-to
+  else payload.submitter_email = '(none given)'
+
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      // _subject / _replyto are Formspree's special fields; the rest just
-      // render as labelled rows in the notification email.
-      _subject: `[${sub.ref}] New ${sub.type} feedback — ${sub.appName}`,
-      _replyto: sub.email || undefined,
-      ref: sub.ref,
-      app: sub.appName,
-      type: sub.type,
-      name: sub.name,
-      email: sub.email || '(none given)',
-      message: sub.message,
-    }),
+    body: JSON.stringify(payload),
   })
   if (!res.ok) console.error(`Formspree notify failed (${res.status}): ${await res.text()}`)
 }
