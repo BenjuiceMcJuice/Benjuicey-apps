@@ -13,7 +13,7 @@ ADMIN_EMAIL = "benjuice.apps@gmail.com"
 # Every new submission is POSTed to it, and Formspree emails you. No verified
 # domain or API-key secret needed. Leave blank to disable. Not secret — it's a
 # public form URL — so it lives here in [vars], not as a wrangler secret.
-FORMSPREE_ENDPOINT = ""
+FORMSPREE_ENDPOINT = "https://formspree.io/f/mdavveyq"
 # Update ALLOWED_ORIGINS once your Cloudflare Pages URL is known
 ALLOWED_ORIGINS = "https://benjuicey-apps.pages.dev,http://localhost:3000,http://localhost:5173,https://aisense.pages.dev,https://ai-literate.pages.dev,https://ai-literate.uk,https://www.ai-literate.uk,https://whatadisaster.pages.dev,https://whatadisaster.uk,https://www.whatadisaster.uk,https://betalog.co.uk,https://www.betalog.co.uk,https://betalog.pages.dev"
 
