@@ -6,6 +6,15 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;')
 }
 
+// Returns a usable Resend key, or null if Resend isn't really configured.
+// Real Resend keys start with "re_"; anything else — unset, a "skip"
+// placeholder, or a value with a stray BOM/whitespace — is treated as OFF so
+// we don't fire (and log) doomed 400s when only Formspree is in use.
+function resendKey(apiKey: string): string | null {
+  const k = (apiKey ?? '').replace(/^﻿/, '').trim()
+  return k.startsWith('re_') ? k : null
+}
+
 // Notifies the admin (Ben) of every new submission. Fire-and-forget:
 // caller wraps this so a failure never fails the submission.
 export async function sendAdminNotification(
@@ -13,11 +22,12 @@ export async function sendAdminNotification(
   adminEmail: string,
   sub: { ref: string; appName: string; type: string; name: string; email: string; message: string },
 ): Promise<void> {
-  if (!apiKey || !adminEmail) return // not configured yet — skip silently
+  const key = resendKey(apiKey)
+  if (!key || !adminEmail) return // Resend not configured — skip silently
   const from = sub.email ? escapeHtml(sub.name) + ' &lt;' + escapeHtml(sub.email) + '&gt;' : escapeHtml(sub.name) + ' (no email given)'
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       // TODO: swap to a verified domain once DNS is set up on Resend.
       // Until then, onboarding@resend.dev only delivers to the Resend
@@ -78,10 +88,11 @@ export async function sendConfirmation(
   ref: string,
   appName: string,
 ): Promise<void> {
-  if (!apiKey) return // not configured yet — skip silently
+  const key = resendKey(apiKey)
+  if (!key) return // Resend not configured — skip silently
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       // TODO: replace with a verified domain once DNS is set up on Resend
       from: 'Ben <onboarding@resend.dev>',
