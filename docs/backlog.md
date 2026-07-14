@@ -103,6 +103,30 @@ submissions/{ref}
 
 ---
 
+### 6. ITIL-Aligned ITSM Backend (Service Desk triage)
+
+**Goal:** Evolve the flat feedback inbox into a lightweight, ITIL-aligned ITSM
+backend — a Service Desk that triages every submission into the right process
+(incident / request / query / problem / change), with priority derived from
+impact × urgency and AI doing the first-pass classification. Epic 4's "AI
+Analysis" becomes the triage engine here.
+
+**Full design:** [`docs/itsm-spec.md`](itsm-spec.md) — record types, triage flow,
+priority matrix, backwards-compatible schema evolution, and the phased AI triage
+(manual → scheduled → trigger-on-new).
+
+**Tasks (phased — see the spec for detail):**
+- [x] Technical fault console in `/admin` — columns, wildcard filters, default = open
+- [ ] Add `recordType` + `sourceType` + ITIL statuses; widen `updateSubmission`
+- [ ] Queue presets + triage panel in the admin UI
+- [ ] Impact/urgency → priority + SLA due date (server-computed)
+- [ ] `problem` records + duplicate/linking
+- [ ] Manual Claude triage run + `POST /admin/triage` write-back
+- [ ] Scheduled triage (propose-only digest)
+- [ ] Trigger-on-new triage via Worker `waitUntil` + Claude API
+
+---
+
 ## Tech Stack
 
 | Layer | Tool |

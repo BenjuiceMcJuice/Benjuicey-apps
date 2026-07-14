@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 
 const API = process.env.NEXT_PUBLIC_FEEDBACK_API_URL!
 
@@ -25,6 +25,61 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 const STATUS_OPTIONS = ['open', 'in-progress', 'done', 'wont-fix']
+const STATUS_ORDER = STATUS_OPTIONS.reduce<Record<string, number>>(
+  (acc, s, i) => ({ ...acc, [s]: i }),
+  {},
+)
+
+// ─── column definitions for the fault table ──────────────────────────
+// key = field on Submission, label = header, flex = grid track sizing.
+type ColKey = 'ref' | 'status' | 'type' | 'appId' | 'name' | 'message' | 'timestamp'
+
+interface Column {
+  key: ColKey
+  label: string
+  track: string
+}
+
+const COLUMNS: Column[] = [
+  { key: 'ref', label: 'REF', track: 'minmax(96px, 0.9fr)' },
+  { key: 'status', label: 'STATUS', track: '110px' },
+  { key: 'type', label: 'TYPE', track: '92px' },
+  { key: 'appId', label: 'APP', track: 'minmax(110px, 1fr)' },
+  { key: 'name', label: 'FROM', track: 'minmax(110px, 1fr)' },
+  { key: 'message', label: 'SUBJECT', track: 'minmax(180px, 2.4fr)' },
+  { key: 'timestamp', label: 'LOGGED', track: '104px' },
+]
+
+const GRID_TEMPLATE = COLUMNS.map(c => c.track).join(' ') + ' 34px'
+const GRID_MIN_WIDTH = 940
+
+// ─── wildcard filtering ──────────────────────────────────────────────
+// Empty filter matches everything. A filter containing `*` is treated as a
+// glob anchored to the whole cell value (`WDA-*`, `*dark mode*`). A filter
+// with no `*` is a plain case-insensitive substring match.
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function matchesFilter(value: string, filter: string): boolean {
+  const q = filter.trim().toLowerCase()
+  if (!q) return true
+  const v = (value ?? '').toLowerCase()
+  if (q.includes('*')) {
+    const pattern = '^' + q.split('*').map(escapeRegex).join('.*') + '$'
+    try {
+      return new RegExp(pattern).test(v)
+    } catch {
+      return v.includes(q.replace(/\*/g, ''))
+    }
+  }
+  return v.includes(q)
+}
+
+type Filters = Record<ColKey, string>
+const EMPTY_FILTERS: Filters = {
+  ref: '', status: '', type: '', appId: '', name: '', message: '', timestamp: '',
+}
 
 export default function Admin() {
   const [password, setPassword] = useState('')
@@ -32,8 +87,10 @@ export default function Admin() {
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [filterStatus, setFilterStatus] = useState('all')
-  const [filterApp, setFilterApp] = useState('all')
+  // Default view: OPEN tickets only.
+  const [filters, setFilters] = useState<Filters>({ ...EMPTY_FILTERS, status: 'open' })
+  const [sortKey, setSortKey] = useState<ColKey>('timestamp')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [editNotes, setEditNotes] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
@@ -98,13 +155,41 @@ export default function Admin() {
     setSaving(null)
   }
 
-  const filtered = submissions.filter(s => {
-    if (filterStatus !== 'all' && s.status !== filterStatus) return false
-    if (filterApp !== 'all' && s.appId !== filterApp) return false
-    return true
-  })
+  function setFilter(key: ColKey, value: string) {
+    setFilters(f => ({ ...f, [key]: value }))
+  }
 
-  const apps = [...new Set(submissions.map(s => s.appId))]
+  function toggleSort(key: ColKey) {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir(key === 'timestamp' ? 'desc' : 'asc')
+    }
+  }
+
+  const activeFilterCount = Object.values(filters).filter(v => v.trim() !== '').length
+
+  const filtered = useMemo(() => {
+    const rows = submissions.filter(s =>
+      COLUMNS.every(c => {
+        const raw = c.key === 'timestamp'
+          ? new Date(s.timestamp).toLocaleDateString('en-GB')
+          : String(s[c.key] ?? '')
+        return matchesFilter(raw, filters[c.key])
+      }),
+    )
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      if (sortKey === 'timestamp') {
+        return (new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) * dir
+      }
+      if (sortKey === 'status') {
+        return ((STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99)) * dir
+      }
+      return String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? '')) * dir
+    })
+  }, [submissions, filters, sortKey, sortDir])
 
   const stats = [
     { label: 'total', value: submissions.length, color: 'var(--color-dark)' },
@@ -112,6 +197,8 @@ export default function Admin() {
     { label: 'in progress', value: submissions.filter(s => s.status === 'in-progress').length, color: '#f39c12' },
     { label: 'done', value: submissions.filter(s => s.status === 'done').length, color: '#27ae60' },
   ]
+
+  const appCount = new Set(submissions.map(s => s.appId)).size
 
   if (!authed) {
     return (
@@ -144,8 +231,8 @@ export default function Admin() {
       {/* Header */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
         <div className="hero pixel-box" style={{ flex: 1 }}>
-          <h1 className="hero-title pixel-font">admin</h1>
-          <p className="hero-sub retro-font">{submissions.length} submissions across {apps.length} apps</p>
+          <h1 className="hero-title pixel-font">fault console</h1>
+          <p className="hero-sub retro-font">{submissions.length} tickets across {appCount} apps</p>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button
@@ -175,123 +262,239 @@ export default function Admin() {
         ))}
       </div>
 
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        {['all', ...STATUS_OPTIONS].map(s => (
-          <button
-            key={s}
-            onClick={() => setFilterStatus(s)}
-            className="retro-font"
-            style={{
-              padding: '6px 14px', border: '3px solid var(--color-dark)', fontSize: 18, cursor: 'pointer',
-              background: filterStatus === s ? 'var(--color-dark)' : 'var(--color-bg)',
-              color: filterStatus === s ? 'var(--color-card)' : 'var(--color-dark)',
-            }}
-          >
-            {s}
-          </button>
-        ))}
-        {apps.length > 1 && (
-          <select
-            className="form-select"
-            value={filterApp}
-            onChange={e => setFilterApp(e.target.value)}
-            style={{ width: 'auto', padding: '6px 14px' }}
-          >
-            <option value="all">all apps</option>
-            {apps.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
-        )}
+      {/* Toolbar: status presets + filter meta */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {[{ v: '', label: 'all' }, ...STATUS_OPTIONS.map(s => ({ v: s, label: s }))].map(s => (
+              <button
+                key={s.label}
+                onClick={() => setFilter('status', s.v)}
+                className="retro-font"
+                style={{
+                  padding: '6px 14px', border: '3px solid var(--color-dark)', fontSize: 18, cursor: 'pointer',
+                  background: filters.status === s.v ? 'var(--color-dark)' : 'var(--color-bg)',
+                  color: filters.status === s.v ? 'var(--color-card)' : 'var(--color-dark)',
+                }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <span className="retro-font" style={{ fontSize: 17, color: 'var(--color-muted)' }}>
+              showing {filtered.length} of {submissions.length}
+            </span>
+            <button
+              onClick={() => setFilters({ ...EMPTY_FILTERS })}
+              disabled={activeFilterCount === 0}
+              className="retro-font"
+              style={{
+                padding: '6px 14px', border: '3px solid var(--color-dark)', fontSize: 17,
+                background: 'var(--color-bg)', cursor: activeFilterCount ? 'pointer' : 'default',
+                opacity: activeFilterCount ? 1 : 0.4,
+              }}
+            >
+              clear filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+            </button>
+          </div>
+        </div>
+        <p className="retro-font" style={{ fontSize: 16, color: 'var(--color-muted)' }}>
+          tip: filter any column — use <strong>*</strong> as a wildcard (e.g. <code>WDA-*</code>, <code>*dark mode*</code>). click a header to sort.
+        </p>
       </div>
 
       {loading && <p className="retro-font" style={{ fontSize: 22, color: 'var(--color-muted)' }}>loading...</p>}
       {error && <p className="retro-font" style={{ fontSize: 20, color: 'red' }}>{error}</p>}
 
-      {/* Submissions list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {!loading && filtered.length === 0 && (
-          <p className="retro-font" style={{ fontSize: 20, color: 'var(--color-muted)' }}>no submissions found</p>
-        )}
-        {filtered.map(sub => (
-          <div key={sub.ref} className="pixel-box" style={{ overflow: 'hidden' }}>
-            {/* Summary row */}
-            <div
-              onClick={() => setExpanded(expanded === sub.ref ? null : sub.ref)}
-              style={{
-                padding: '14px 20px', cursor: 'pointer',
-                background: expanded === sub.ref ? '#ede8dc' : 'transparent',
-                display: 'grid',
-                gridTemplateColumns: 'auto auto auto 1fr auto auto',
-                gap: 16, alignItems: 'center',
-              }}
-            >
-              <span className="pixel-font" style={{ fontSize: 8, whiteSpace: 'nowrap' }}>{sub.ref}</span>
-              <span
-                className="retro-font"
-                style={{ fontSize: 13, color: STATUS_COLORS[sub.status] ?? 'var(--color-muted)', fontWeight: 'bold', whiteSpace: 'nowrap' }}
-              >
-                {sub.status}
-              </span>
-              <span className="retro-font" style={{ fontSize: 16, color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>{sub.type}</span>
-              <span className="retro-font" style={{ fontSize: 19, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <strong>{sub.name}</strong> — {sub.message}
-              </span>
-              <span className="retro-font" style={{ fontSize: 15, color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>
-                {new Date(sub.timestamp).toLocaleDateString('en-GB')}
-              </span>
-              <span style={{ color: 'var(--color-muted)' }}>{expanded === sub.ref ? '▲' : '▼'}</span>
-            </div>
+      {/* Fault table */}
+      <div className="pixel-box" style={{ overflowX: 'auto', padding: 0 }}>
+        <div style={{ minWidth: GRID_MIN_WIDTH }}>
+          {/* Header row */}
+          <div
+            style={{
+              display: 'grid', gridTemplateColumns: GRID_TEMPLATE,
+              background: 'var(--color-dark)', color: 'var(--color-card)',
+            }}
+          >
+            {COLUMNS.map(c => {
+              const active = sortKey === c.key
+              return (
+                <button
+                  key={c.key}
+                  onClick={() => toggleSort(c.key)}
+                  className="pixel-font"
+                  style={{
+                    fontSize: 8, lineHeight: 1.4, textAlign: 'left', padding: '12px 12px 10px',
+                    background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+                  }}
+                  title={`sort by ${c.label.toLowerCase()}`}
+                >
+                  {c.label}
+                  <span style={{ opacity: active ? 1 : 0.3, fontSize: 9 }}>
+                    {active ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </button>
+              )
+            })}
+            <span />
+          </div>
 
-            {/* Expanded detail */}
-            {expanded === sub.ref && (
-              <div style={{ borderTop: '3px solid var(--color-dark)', padding: '20px', display: 'flex', flexDirection: 'column', gap: 18 }}>
-                <div>
-                  <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>FROM</div>
-                  <div className="retro-font" style={{ fontSize: 20 }}>
-                    {sub.name}{sub.email ? ` — ${sub.email}` : ' (no email)'}
-                  </div>
-                </div>
-                <div>
-                  <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>MESSAGE</div>
-                  <div className="retro-font" style={{ fontSize: 20, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{sub.message}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                  <div>
-                    <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>STATUS</div>
-                    <select
-                      className="form-select"
-                      value={sub.status}
-                      onChange={e => updateStatus(sub.ref, e.target.value)}
-                      style={{ width: 'auto' }}
+          {/* Filter row */}
+          <div
+            style={{
+              display: 'grid', gridTemplateColumns: GRID_TEMPLATE,
+              borderBottom: '3px solid var(--color-dark)', background: '#ede8dc',
+            }}
+          >
+            {COLUMNS.map(c => (
+              <div key={c.key} style={{ padding: '7px 8px' }}>
+                <input
+                  value={filters[c.key]}
+                  onChange={e => setFilter(c.key, e.target.value)}
+                  placeholder="filter *"
+                  className="retro-font"
+                  style={{
+                    width: '100%', fontSize: 15, padding: '5px 7px',
+                    border: '2px solid var(--color-dark)', background: 'var(--color-card)',
+                    color: 'var(--color-dark)', outline: 'none',
+                    fontFamily: 'var(--font-retro), monospace',
+                  }}
+                />
+              </div>
+            ))}
+            <span />
+          </div>
+
+          {/* Data rows */}
+          {!loading && filtered.length === 0 && (
+            <p className="retro-font" style={{ fontSize: 20, color: 'var(--color-muted)', padding: '22px 16px' }}>
+              no tickets match the current filters
+            </p>
+          )}
+          {filtered.map((sub, i) => {
+            const isOpen = expanded === sub.ref
+            return (
+              <div
+                key={sub.ref}
+                style={{ borderBottom: '2px solid rgba(44,44,58,0.18)' }}
+              >
+                {/* Summary row */}
+                <div
+                  onClick={() => setExpanded(isOpen ? null : sub.ref)}
+                  style={{
+                    display: 'grid', gridTemplateColumns: GRID_TEMPLATE, alignItems: 'center',
+                    cursor: 'pointer',
+                    background: isOpen ? '#ede8dc' : (i % 2 ? 'rgba(44,44,58,0.03)' : 'transparent'),
+                  }}
+                >
+                  <span className="retro-font" style={{ padding: '11px 12px', fontSize: 16, fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                    {sub.ref}
+                  </span>
+                  <span style={{ padding: '11px 12px', whiteSpace: 'nowrap' }}>
+                    <span
+                      className="retro-font"
+                      style={{
+                        fontSize: 14, fontWeight: 'bold',
+                        color: STATUS_COLORS[sub.status] ?? 'var(--color-muted)',
+                        borderBottom: `2px solid ${STATUS_COLORS[sub.status] ?? 'var(--color-muted)'}`,
+                        paddingBottom: 1,
+                      }}
                     >
-                      {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 200 }}>
-                    <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>INTERNAL NOTES</div>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      <input
-                        className="form-input"
-                        value={editNotes[sub.ref] ?? ''}
-                        onChange={e => setEditNotes(n => ({ ...n, [sub.ref]: e.target.value }))}
-                        placeholder="notes visible only to you..."
-                        style={{ flex: 1 }}
-                      />
-                      <button
-                        className="form-submit"
-                        onClick={() => saveNotes(sub.ref)}
-                        disabled={saving === sub.ref}
-                        style={{ padding: '10px 18px', alignSelf: 'stretch' }}
-                      >
-                        {saving === sub.ref ? '...' : 'SAVE'}
-                      </button>
+                      {sub.status}
+                    </span>
+                  </span>
+                  <span className="retro-font" style={{ padding: '11px 12px', fontSize: 16, color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>
+                    {sub.type}
+                  </span>
+                  <span className="retro-font" style={{ padding: '11px 12px', fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {sub.appId}
+                  </span>
+                  <span className="retro-font" style={{ padding: '11px 12px', fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {sub.name}
+                  </span>
+                  <span className="retro-font" style={{ padding: '11px 12px', fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {sub.message}
+                  </span>
+                  <span className="retro-font" style={{ padding: '11px 12px', fontSize: 15, color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>
+                    {new Date(sub.timestamp).toLocaleDateString('en-GB')}
+                  </span>
+                  <span style={{ padding: '11px 8px', color: 'var(--color-muted)', textAlign: 'center' }}>
+                    {isOpen ? '▲' : '▼'}
+                  </span>
+                </div>
+
+                {/* Expanded detail */}
+                {isOpen && (
+                  <div style={{ borderTop: '3px solid var(--color-dark)', padding: '20px', display: 'flex', flexDirection: 'column', gap: 18, background: 'var(--color-card)' }}>
+                    <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
+                      <div>
+                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>REF</div>
+                        <div className="retro-font" style={{ fontSize: 18, fontWeight: 'bold' }}>{sub.ref}</div>
+                      </div>
+                      <div>
+                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>APP</div>
+                        <div className="retro-font" style={{ fontSize: 18 }}>{sub.appId} ({sub.trigram})</div>
+                      </div>
+                      <div>
+                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>TYPE</div>
+                        <div className="retro-font" style={{ fontSize: 18 }}>{sub.type}</div>
+                      </div>
+                      <div>
+                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>LOGGED</div>
+                        <div className="retro-font" style={{ fontSize: 18 }}>{new Date(sub.timestamp).toLocaleString('en-GB')}</div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>FROM</div>
+                      <div className="retro-font" style={{ fontSize: 20 }}>
+                        {sub.name}{sub.email ? ` — ${sub.email}` : ' (no email)'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>MESSAGE</div>
+                      <div className="retro-font" style={{ fontSize: 20, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{sub.message}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                      <div>
+                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>STATUS</div>
+                        <select
+                          className="form-select"
+                          value={sub.status}
+                          onChange={e => updateStatus(sub.ref, e.target.value)}
+                          style={{ width: 'auto' }}
+                        >
+                          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>INTERNAL NOTES</div>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <input
+                            className="form-input"
+                            value={editNotes[sub.ref] ?? ''}
+                            onChange={e => setEditNotes(n => ({ ...n, [sub.ref]: e.target.value }))}
+                            placeholder="notes visible only to you..."
+                            style={{ flex: 1 }}
+                          />
+                          <button
+                            className="form-submit"
+                            onClick={() => saveNotes(sub.ref)}
+                            disabled={saving === sub.ref}
+                            style={{ padding: '10px 18px', alignSelf: 'stretch' }}
+                          >
+                            {saving === sub.ref ? '...' : 'SAVE'}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
-            )}
-          </div>
-        ))}
+            )
+          })}
+        </div>
       </div>
     </main>
   )

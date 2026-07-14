@@ -136,3 +136,48 @@ The code is ready; notifications stay dormant until a real key is set:
 
 Confirmation emails to *other* submitters still need a verified domain (change
 the `from:` off `onboarding@resend.dev` in `email.ts`) — left off for now.
+
+## 2026-07-14 — Session 3: Technical fault console + ITIL/ITSM spec
+
+Two things: made the admin faults view behave like a real ticketing tool, and
+spec'd out where the whole feedback backend is heading (ITIL-aligned ITSM with a
+Service Desk triage function).
+
+### 1. Admin `/admin` — from feedback cards to a fault console
+Kept the pixel aesthetic (pixel-box, pixel/retro fonts, the dark palette) but
+rebuilt the list as a technical, columnar table (`app/admin/page.tsx`):
+- **Columns:** REF · STATUS · TYPE · APP · FROM · SUBJECT · LOGGED, aligned via a
+  shared CSS-grid template (header + filter row + data rows), horizontally
+  scrollable inside a pixel-box on narrow screens.
+- **Per-column wildcard filters.** A filter input under every column header.
+  `*` is a glob wildcard anchored to the whole cell (`WDA-*`, `*dark mode*`);
+  plain text with no `*` is a case-insensitive substring match. Implemented in a
+  small `matchesFilter()` (glob → anchored regex, with a substring fallback).
+- **Default view = OPEN tickets.** Initial `filters.status = 'open'` so the
+  console lands on the open queue, not everything. Status preset buttons
+  (all/open/in-progress/done/wont-fix) drive the same status filter; a "clear
+  filters (n)" button and a "showing X of Y" counter round out the toolbar.
+- **Click-to-sort headers** (asc/desc; status sorts by lifecycle order, LOGGED by
+  date, default LOGGED desc). Row still expands to the full detail/notes/status
+  editor — unchanged behaviour, restyled to fit.
+- Verified with `next build` (types + lint clean).
+
+### 2. `docs/itsm-spec.md` — ITIL-aligned ITSM backend (spec only, not built)
+Design doc for turning the flat `submissions` inbox into a lightweight Service
+Desk that triages every item into the right ITIL process:
+- **Record types:** `incident` / `request` / `query` / `problem` / `change`, with
+  a default mapping from today's `bug`/`content`/`request`/`general` `type`s (raw
+  value retained as `sourceType`).
+- **Triage flow + priority** from an impact × urgency matrix (P1–P4) with advisory
+  SLA targets; per-record-type lifecycles; a backwards-compatible schema evolution
+  (new fields default sensibly, old statuses map onto the new ITIL states, no
+  forced migration).
+- **AI triage engine, phased exactly as Ben framed it:** (A) manual — ask Claude
+  Code to pull `/admin/submissions`, classify, confirm, write back; (B) scheduled
+  (Routine/cron, propose-only first, gated auto-apply later); (C) trigger-on-new
+  via the Worker's existing `POST /submit` using `ctx.waitUntil` so triage is
+  best-effort and never blocks the save (keeps the platform's "save is source of
+  truth" rule). Human-in-the-loop with `triage.confidence`/`rationale` throughout.
+- Rollout is phased and each phase is independently shippable; open decisions for
+  Ben are listed at the end. Explicitly out of scope: CMDB, asset mgmt, CAB —
+  ITIL as vocabulary, not a framework to implement wholesale.
