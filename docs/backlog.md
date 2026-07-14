@@ -111,9 +111,15 @@ backend — a Service Desk that triages every submission into the right process
 impact × urgency and AI doing the first-pass classification. Epic 4's "AI
 Analysis" becomes the triage engine here.
 
-**Full design:** [`docs/itsm-spec.md`](itsm-spec.md) — record types, triage flow,
-priority matrix, backwards-compatible schema evolution, and the phased AI triage
-(manual → scheduled → trigger-on-new).
+**Full design:**
+- [`docs/itsm-spec.md`](itsm-spec.md) — record types, triage flow, priority matrix,
+  backwards-compatible schema evolution, and the phased AI triage (manual →
+  scheduled → trigger-on-new).
+- [`docs/ticket-data-model.md`](ticket-data-model.md) — the concrete field-level
+  schema: ticket types, the unified status enum + validity matrix, problems
+  collection, indexes, migration.
+- [`docs/admin-console-spec.md`](admin-console-spec.md) — admin UX: movable/editable
+  columns, multi-select bulk actions, iOS-friendly card view, and further ideas.
 
 **Tasks (phased — see the spec for detail):**
 - [x] Technical fault console in `/admin` — columns, wildcard filters, default = open
@@ -124,6 +130,12 @@ priority matrix, backwards-compatible schema evolution, and the phased AI triage
 - [ ] Manual Claude triage run + `POST /admin/triage` write-back
 - [ ] Scheduled triage (propose-only digest)
 - [ ] Trigger-on-new triage via Worker `waitUntil` + Claude API
+
+**Admin console UX (see `docs/admin-console-spec.md`):**
+- [ ] Configurable columns — reorder, show/hide, persist (localStorage)
+- [ ] Multi-select + bulk action bar + `POST /admin/bulk` endpoint
+- [ ] iOS-friendly card view + table⇄cards toggle
+- [ ] Saved views + URL-encoded shareable state + global search
 
 ---
 

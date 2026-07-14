@@ -181,3 +181,44 @@ Desk that triages every item into the right ITIL process:
 - Rollout is phased and each phase is independently shippable; open decisions for
   Ben are listed at the end. Explicitly out of scope: CMDB, asset mgmt, CAB —
   ITIL as vocabulary, not a framework to implement wholesale.
+
+## 2026-07-14 — Session 4: Data model + admin console UX specs (planning)
+
+Planning-only session — two new design docs, no code. Fleshes out the "suitable
+data model" and the next round of admin console features Ben asked for.
+
+### `docs/ticket-data-model.md` — concrete ticket schema
+The field-level model behind `itsm-spec.md` (which stayed high-level):
+- **Ticket types** (`recordType`): incident / request / query / problem / change /
+  null(untriaged), each with its own allowed statuses; legacy `type` mapping kept.
+- Full `tickets/{ref}` field table (identity/source, people, content, classification
+  + derived priority, lifecycle timestamps, relationships, triage/SLA), a **unified
+  `status` enum with a per-type validity matrix**, an enum reference, the separate
+  **global** `problems/{PRB-000n}` collection, Firestore index list, and a
+  no-forced-migration/lazy-backfill plan. `timestamp→createdAt` handled as an alias.
+- UI preferences (column config, saved views, view mode) defined as **user prefs**,
+  stored in `localStorage` first (`benjuicey-admin-prefs`), server-side only if
+  multi-device drift bites — deliberately kept out of the ticket documents.
+
+### `docs/admin-console-spec.md` — the UX layer
+Specs the features requested, on top of the shipped fault table:
+- **Movable / editable columns** — reorder (nudge first, drag later), show/hide via
+  a ⚙ popover, resize, persisted; covers both readings of "editable" (configurable
+  set *and* inline cell quick-edit).
+- **Multi-select + bulk actions** — checkbox column, select-all-within-filter,
+  shift-range, a bulk action bar (status / record type / priority / assignee / tag /
+  close-with-reason / export), and the **`POST /admin/bulk`** Worker endpoint it
+  needs (batched commit; `PATCH` is one-at-a-time today).
+- **iOS-friendly view** — responsive card/stack layout + a manual table⇄cards
+  toggle, 44px touch targets, 16px inputs (no Safari zoom), safe-area insets,
+  momentum scroll, a collapsed global-search on mobile, and cheap PWA meta for
+  Add-to-Home-Screen.
+- **Further ideas, prioritised** — saved views, URL-encoded shareable state, global
+  search, inline quick-edit, CSV/JSON export (high value/low cost); SLA/age +
+  overdue queue, density toggle, "N new since load" banner, per-queue badge counts,
+  keyboard shortcuts (medium); audit trail, duplicate merge, pagination/
+  virtualisation, light/dark toggle, volume charts (later).
+- Phased rollout A–D, each independently shippable; out-of-scope list keeps it a
+  single-operator triage surface, not a help-desk SaaS.
+
+Backlog Epic 6 updated to point at both new docs.
