@@ -72,26 +72,26 @@ There's also a tiny `counters/{trigram}` document per app that just holds the la
 
 There are **two independent ways** to get a notification email on every new submission. They're separate channels — you can turn on either, both, or neither, and each one is best-effort (a send failure never blocks a submission that's already saved to Firestore).
 
-- **Formspree (easiest — no domain, no secret).** If `FORMSPREE_ENDPOINT` is set in `wrangler.toml`, the Worker POSTs every new submission to your Formspree form (`sendFormspreeNotification` in `worker/src/email.ts`), and Formspree emails you. This is the recommended path because it reuses a Formspree account you already have and needs zero DNS/domain setup.
-- **Resend (richer, self-hosted HTML).** If a `RESEND_API_KEY` secret is set, the Worker also emails `ADMIN_EMAIL` a formatted HTML summary directly (`sendAdminNotification`). In Resend test mode the `onboarding@resend.dev` sender can only deliver to your own Resend-account address, so `ADMIN_EMAIL` must match it.
+> ⚠️ **Learned the hard way (2026-07-14): use Resend, not Formspree, for notifications.** Because the browser never talks to Formspree here — the *Worker* POSTs to it server-side, from a Cloudflare datacenter IP — Formspree's spam filter files every notification under **Spam** and never emails you. Realistic content and "Not Spam" training didn't fix it; the datacenter-origin signal dominates. Formspree is built for a browser posting *directly* to it, so it's the wrong tool for this server-side fan-out. See the DEVLOG (2026-07-14 session 2) for the full write-up. **Resend is the supported path.**
+
+- **Resend (recommended).** If a `RESEND_API_KEY` secret is set (a real `re_…` key — the code ignores placeholders), the Worker emails `ADMIN_EMAIL` a formatted HTML summary directly (`sendAdminNotification`). It's an email API built for server-side sending, so it doesn't spam-filter your own mail. In test mode the `onboarding@resend.dev` sender can only deliver to your own Resend-account address, so `ADMIN_EMAIL` must match it — which needs **no domain verification** for notifications to yourself.
+- **Formspree (not recommended — see warning above).** If `FORMSPREE_ENDPOINT` is set in `wrangler.toml`, the Worker POSTs every submission to your Formspree form (`sendFormspreeNotification`). It reaches Formspree fine and records there, but the submissions land in Spam and no email fires. Kept in the code as a fallback / for reference only.
 - **Confirmation email to the submitter** (`sendConfirmation`, Resend only) — a "got your message, ref WDA-0001" reply, sent only if they left an email. Needs a **verified domain** on Resend (the `onboarding@resend.dev` test sender can't email arbitrary recipients), so it stays off until that's done.
 - **No spam/rate limiting yet.** Anyone can POST to `/submit`. Fine at current volume; if abused, add Cloudflare rate limiting or Turnstile in front of the Worker.
 
 ### Turning email on
 
-**Option A — Formspree (do this if you already have an account):**
+**Recommended — Resend:**
 
-1. In your [Formspree](https://formspree.io) dashboard, create (or reuse) a form and copy its endpoint — it looks like `https://formspree.io/f/abcdwxyz`. Make sure the form is set to notify the email address you want.
-2. Paste it into `worker/wrangler.toml` as `FORMSPREE_ENDPOINT = "https://formspree.io/f/abcdwxyz"`.
-3. Redeploy: `cd worker && npx wrangler deploy`. That's it — no secret, no domain verification.
+1. Create a [Resend](https://resend.com) account. **Sign up with the email you want notifications to land in** (`benjuice.apps@gmail.com` — it already matches `ADMIN_EMAIL`) — in test mode the `onboarding@resend.dev` sender can only deliver to that account's own address.
+2. Grab an API key (starts with `re_`) and set it as the Worker secret: `cd worker && npx wrangler secret put RESEND_API_KEY` (paste the key), then `npx wrangler deploy`.
+3. Submit a test — the admin notification should land with no spam filtering. To also send **confirmation emails to submitters**, verify a domain on Resend and change the `from:` address in `email.ts` off `onboarding@resend.dev`.
 
-> First-time Formspree gotcha: Formspree usually holds the very first submission to a new form until you click a confirmation link it emails you. Send one test submission, confirm it, and the rest flow through. Free tier caps at ~50 submissions/month.
+**Fallback — Formspree (kept for reference; notifications land in Spam, see the warning above):**
 
-**Option B — Resend (richer HTML email, or if you'd rather not use Formspree):**
-
-1. Create a [Resend](https://resend.com) account. **Sign up with the email you want notifications to land in** — in test mode the `onboarding@resend.dev` sender can only deliver to that account's own address, which is why `ADMIN_EMAIL` must match it.
-2. Grab an API key and set it as the Worker secret: `cd worker && npx wrangler secret put RESEND_API_KEY` (paste the key), then redeploy.
-3. Admin notifications to yourself now work. To also send **confirmation emails to submitters**, verify a domain on Resend and change the `from:` address in `email.ts` off `onboarding@resend.dev`.
+1. In your [Formspree](https://formspree.io) dashboard, copy the form endpoint — it looks like `https://formspree.io/f/abcdwxyz`.
+2. Paste it into `worker/wrangler.toml` as `FORMSPREE_ENDPOINT = "…"` and redeploy.
+3. Submissions will reach Formspree and record there, but expect them in the **Spam** tab with no email — which is why Resend is the supported path.
 
 Until one of these is done, feedback still saves fine — you just read it in the admin dashboard, and the "ask Claude to categorise" workflow below is the way to stay on top of it.
 
