@@ -1,6 +1,6 @@
 import { getAccessToken } from './auth'
 import { createSubmission, listSubmissions, updateSubmission } from './firestore'
-import { sendConfirmation, sendAdminNotification } from './email'
+import { sendConfirmation, sendAdminNotification, sendFormspreeNotification } from './email'
 import { getTrigram, APP_NAMES } from './trigrams'
 import { WIDGET_JS } from './widget'
 
@@ -11,6 +11,7 @@ export interface Env {
   ALLOWED_ORIGINS: string
   ADMIN_PASSWORD: string
   ADMIN_EMAIL: string
+  FORMSPREE_ENDPOINT: string
 }
 
 function corsHeaders(origin: string, allowedOriginsEnv: string): HeadersInit {
@@ -82,10 +83,15 @@ export default {
         // Emails are best-effort — a failure here must NOT fail a submission
         // that has already been written to Firestore.
         try {
-          await sendAdminNotification(env.RESEND_API_KEY, env.ADMIN_EMAIL, {
+          const notify = {
             ref, appName: APP_NAMES[appId] ?? appId, type: type ?? 'general',
             name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
-          })
+          }
+          // Two independent admin-notification channels — either, both, or
+          // neither can be configured. Formspree (env var, no domain needed)
+          // is the easy path; Resend (secret) is the richer/HTML path.
+          await sendFormspreeNotification(env.FORMSPREE_ENDPOINT, notify)
+          await sendAdminNotification(env.RESEND_API_KEY, env.ADMIN_EMAIL, notify)
           if (email?.trim()) {
             await sendConfirmation(env.RESEND_API_KEY, email.trim(), name.trim(), ref, APP_NAMES[appId] ?? appId)
           }

@@ -59,3 +59,15 @@ Whatadisaster had drifted: it had built its own standalone Firebase project + Fi
 Wrote the canonical cross-app standard: **[`docs/feedback-standard.md`](docs/feedback-standard.md)** — the single source of truth every app's DEVLOG points back to. It defines the uniform schema, the canonical `type` categories (`bug`/`content`/`request`/`general`), the `appId`→trigram stamping, and the rule that the **portfolio's own feedback is generic** (`appId: 'portfolio'` → `BEJ`). Companion doc **[`docs/feedback-how-it-works.md`](docs/feedback-how-it-works.md)** explains the end-to-end flow (submit → ref → Firestore writes → email status), the data model, how to review via the admin dashboard/API, and the workflow for having Claude categorise/triage new submissions (manually or scheduled).
 
 Aligned the two surfaces that had drifted to non-canonical `type` values: the portfolio `/contact` form (dropped `collab`/`hi`, now `bug`/`content`/`request`/`general`) and `ai-literate`'s modal (`hi` → `general`). The widget was already canonical.
+
+## 2026-07-14 — Email notifications via Formspree
+
+The feedback pipeline collected everything into the shared Firestore DB but never actually pushed a notification — the only email path was Resend, which sat dormant (no `RESEND_API_KEY`, and confirmation emails need a verified domain). Added a second, zero-setup notification channel using the existing Formspree account.
+
+- New `sendFormspreeNotification` in `worker/src/email.ts` — POSTs each new submission to a Formspree form endpoint, which emails Ben. No verified domain, no API-key secret.
+- Wired into `POST /submit` alongside the existing Resend admin notification. Both are independent and best-effort: either, both, or neither can be configured, and a send failure never fails a submission already written to Firestore.
+- New `FORMSPREE_ENDPOINT` var in `wrangler.toml` (blank by default — it's a public form URL, not a secret). Set it + redeploy to turn emails on.
+- Docs updated (`docs/feedback-how-it-works.md`) with an "Option A — Formspree / Option B — Resend" turn-it-on guide.
+
+### Note on the "one DB for all apps" question
+Confirmed: there's a single shared Firestore `submissions` collection; every app that POSTs to the Worker with a registered `appId` lands there, tagged by trigram. Registered apps (`worker/src/trigrams.ts`): portfolio, betalog, ironlog, walkwithme, whatadisaster, ai-literate, dungeonofmontor, benmed. **Caveat:** browser submissions also require the app's live origin to be in `ALLOWED_ORIGINS`. Currently whitelisted: portfolio, ai-literate, whatadisaster, betalog. Registered-but-not-yet-whitelisted (would be CORS-blocked until their domain is added): ironlog, walkwithme, dungeonofmontor, benmed.

@@ -36,6 +36,35 @@ export async function sendAdminNotification(
   if (!res.ok) console.error(`Resend admin notify failed (${res.status}): ${await res.text()}`)
 }
 
+// Notifies the admin (Ben) via Formspree instead of Resend. This is the
+// zero-setup path: Formspree needs no verified domain and no API-key secret —
+// just the public form endpoint (https://formspree.io/f/xxxx), which Formspree
+// emails to whatever address the form is configured to notify. Fire-and-forget:
+// caller wraps this so a failure never fails the submission.
+export async function sendFormspreeNotification(
+  endpoint: string,
+  sub: { ref: string; appName: string; type: string; name: string; email: string; message: string },
+): Promise<void> {
+  if (!endpoint) return // not configured yet — skip silently
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      // _subject / _replyto are Formspree's special fields; the rest just
+      // render as labelled rows in the notification email.
+      _subject: `[${sub.ref}] New ${sub.type} feedback — ${sub.appName}`,
+      _replyto: sub.email || undefined,
+      ref: sub.ref,
+      app: sub.appName,
+      type: sub.type,
+      name: sub.name,
+      email: sub.email || '(none given)',
+      message: sub.message,
+    }),
+  })
+  if (!res.ok) console.error(`Formspree notify failed (${res.status}): ${await res.text()}`)
+}
+
 export async function sendConfirmation(
   apiKey: string,
   to: string,
