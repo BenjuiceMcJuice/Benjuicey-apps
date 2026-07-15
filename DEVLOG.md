@@ -181,3 +181,32 @@ Desk that triages every item into the right ITIL process:
 - Rollout is phased and each phase is independently shippable; open decisions for
   Ben are listed at the end. Explicitly out of scope: CMDB, asset mgmt, CAB —
   ITIL as vocabulary, not a framework to implement wholesale.
+
+## 2026-07-15 — Session: Route What a Disaster feedback to Heather
+
+### What & why
+Heather (co-runs What a Disaster) asked to receive the feedback emails for WDA,
+and for it to be visible that she's been contacted. Only WDA — every other app
+still notifies Ben alone.
+
+### What got built (`worker/`)
+- **Per-app extra notifiers.** `extraRecipientsFor(appId, env)` in `index.ts`
+  returns `[{ email, name: 'Heather' }]` for `whatadisaster` when the new
+  `WDA_NOTIFY_EMAIL` env var is set, else `[]`. Address lives in an env var /
+  Cloudflare secret so no personal email is committed to the repo.
+- **`sendAdminNotification`** now takes `extraRecipients` → CCs them and appends
+  a "🔔 Heather has also been notified of this What a Disaster feedback" line, so
+  anyone reading the notification can see she's in the loop.
+- **`sendConfirmation`** takes `alsoNotified` names → adds a "Heather … has also
+  been notified" line to the submitter's confirmation (dormant until submitter
+  confirmations turn on, but ready and it satisfies the "let people know" ask).
+- `wrangler.toml`: documented `WDA_NOTIFY_EMAIL` var (empty default).
+- Typecheck clean (`tsc --noEmit`).
+
+### ⚠️ One step left before Heather actually receives mail
+Resend is still in **test mode** (`onboarding@resend.dev` sender), which only
+delivers to the Resend account owner's own address — so the CC to Heather is
+dropped by Resend until a **domain is verified** on Resend and the `from:` is
+switched off `onboarding@resend.dev`. Routing/UX is live; delivery to Heather
+waits on that single Resend step. Also: set `WDA_NOTIFY_EMAIL` to Heather's real
+address (var or `wrangler secret put WDA_NOTIFY_EMAIL`) + `wrangler deploy`.

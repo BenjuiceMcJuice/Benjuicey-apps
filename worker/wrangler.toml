@@ -8,6 +8,14 @@ FIRESTORE_PROJECT_ID = "benjuicey-apps"
 # test mode (onboarding@resend.dev sender), this MUST be the email your Resend
 # account was created with, or delivery is rejected. Change freely.
 ADMIN_EMAIL = "benjuice.apps@gmail.com"
+# Extra notification recipient for What a Disaster (WDA) feedback only — Heather
+# is CC'd on those admin notifications and named as "also notified". Leave empty
+# to notify only Ben. Set Heather's address here, or keep it private as a secret
+# instead (`wrangler secret put WDA_NOTIFY_EMAIL`) — a secret overrides this.
+# ⚠️ While Resend is in test mode (onboarding@resend.dev sender), Resend only
+# delivers to the account owner, so Heather won't actually receive mail until a
+# domain is verified on Resend. The routing is ready; delivery waits on that.
+WDA_NOTIFY_EMAIL = ""
 # NOTE: Formspree was tried as a zero-setup notification channel and retired —
 # it spam-filters every server-side POST from the Worker, so no email ever
 # fires (see DEVLOG 2026-07-14 session 2). Resend replaces it.

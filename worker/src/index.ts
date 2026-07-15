@@ -11,6 +11,20 @@ export interface Env {
   ALLOWED_ORIGINS: string
   ADMIN_PASSWORD: string
   ADMIN_EMAIL: string
+  // Extra notification recipient for What a Disaster feedback (Heather).
+  // Optional — empty/unset means "just notify Ben" as before.
+  WDA_NOTIFY_EMAIL: string
+}
+
+// Per-app extra notification recipients, beyond ADMIN_EMAIL. Each entry's
+// email comes from an env var so no personal address is committed to the repo.
+// Currently: What a Disaster also notifies Heather.
+function extraRecipientsFor(appId: string, env: Env): { email: string; name: string }[] {
+  const recipients: { email: string; name: string }[] = []
+  if (appId === 'whatadisaster' && env.WDA_NOTIFY_EMAIL?.trim()) {
+    recipients.push({ email: env.WDA_NOTIFY_EMAIL.trim(), name: 'Heather' })
+  }
+  return recipients
 }
 
 function corsHeaders(origin: string, allowedOriginsEnv: string): HeadersInit {
@@ -86,13 +100,19 @@ export default {
             ref, appName: APP_NAMES[appId] ?? appId, type: type ?? 'general',
             name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
           }
+          // Per-app extra notifiers (e.g. Heather for What a Disaster). They're
+          // CC'd on the admin notification and named as "also notified".
+          const extra = extraRecipientsFor(appId, env)
           // Resend is the admin-notification channel: an email API built for
           // server-side sending, so it doesn't spam-filter our own mail the
           // way Formspree did (see DEVLOG 2026-07-14 session 2). Dormant until
           // a real `re_` RESEND_API_KEY secret is set.
-          await sendAdminNotification(env.RESEND_API_KEY, env.ADMIN_EMAIL, notify)
+          await sendAdminNotification(env.RESEND_API_KEY, env.ADMIN_EMAIL, notify, extra)
           if (email?.trim()) {
-            await sendConfirmation(env.RESEND_API_KEY, email.trim(), name.trim(), ref, APP_NAMES[appId] ?? appId)
+            await sendConfirmation(
+              env.RESEND_API_KEY, email.trim(), name.trim(), ref, APP_NAMES[appId] ?? appId,
+              extra.map(r => r.name),
+            )
           }
         } catch (emailErr) {
           console.error('email send failed (submission still saved)', emailErr)
