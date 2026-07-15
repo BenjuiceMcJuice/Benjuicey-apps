@@ -101,7 +101,8 @@ export default {
             name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
           }
           // Per-app extra notifiers (e.g. Heather for What a Disaster). They're
-          // CC'd on the admin notification and named as "also notified".
+          // BCC'd on the admin notification (address kept private) and named as
+          // "also notified".
           const extra = extraRecipientsFor(appId, env)
           // Resend is the admin-notification channel: an email API built for
           // server-side sending, so it doesn't spam-filter our own mail the

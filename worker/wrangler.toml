@@ -8,9 +8,10 @@ FIRESTORE_PROJECT_ID = "benjuicey-apps"
 # whatadisaster.uk domain is verified on Resend, this can be any address.
 ADMIN_EMAIL = "benjuice.apps@gmail.com"
 # Extra notification recipient for What a Disaster (WDA) feedback only — Heather
-# is CC'd on those admin notifications and named as "also notified". Leave empty
-# to notify only Ben. Keep her address private as a secret instead of setting it
-# here: `wrangler secret put WDA_NOTIFY_EMAIL` (a secret overrides this value).
+# is BCC'd on those admin notifications (her address stays private, never shown
+# in the email header) and named by first name in an "also notified" line. Leave
+# empty to notify only Ben. Set her address as a secret rather than here so it's
+# not committed: `wrangler secret put WDA_NOTIFY_EMAIL` (a secret overrides this).
 WDA_NOTIFY_EMAIL = ""
 # NOTE: Formspree was tried as a zero-setup notification channel and retired —
 # it spam-filters every server-side POST from the Worker, so no email ever

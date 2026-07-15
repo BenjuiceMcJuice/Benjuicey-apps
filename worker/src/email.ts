@@ -19,12 +19,10 @@ function resendKey(apiKey: string): string | null {
 // caller wraps this so a failure never fails the submission.
 //
 // `extraRecipients` are per-app additional notifiers (e.g. Heather for What a
-// Disaster). They're CC'd on the same email, and — so everyone can see the
-// feedback wasn't only sent to Ben — named in a "has also been notified" line.
-//
-// ⚠️ Delivery caveat: while Resend is in test mode (onboarding@resend.dev
-// sender), Resend only delivers to the account owner's own address, so any
-// extra recipient is silently dropped by Resend until a domain is verified.
+// Disaster). They're BCC'd — so they receive the email but their address is
+// kept private (never shown in the header to Ben or anyone else) — and named
+// by first name only in a "has also been notified" line, so it's visible they
+// were looped in without exposing their email.
 export async function sendAdminNotification(
   apiKey: string,
   adminEmail: string,
@@ -34,7 +32,7 @@ export async function sendAdminNotification(
   const key = resendKey(apiKey)
   if (!key || !adminEmail) return // Resend not configured — skip silently
   const from = sub.email ? escapeHtml(sub.name) + ' &lt;' + escapeHtml(sub.email) + '&gt;' : escapeHtml(sub.name) + ' (no email given)'
-  const cc = extraRecipients.map(r => r.email).filter(Boolean)
+  const bcc = extraRecipients.map(r => r.email).filter(Boolean)
   const notifiedLine = extraRecipients.length
     ? `<p style="color:#555">🔔 ${extraRecipients.map(r => escapeHtml(r.name)).join(', ')} ${extraRecipients.length > 1 ? 'have' : 'has'} also been notified of this ${escapeHtml(sub.appName)} feedback.</p>`
     : ''
@@ -43,11 +41,11 @@ export async function sendAdminNotification(
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       // Sends from the verified whatadisaster.uk domain on Resend, so mail
-      // delivers to any recipient (ADMIN_EMAIL and `cc`s like Heather), not
-      // just the Resend account owner.
+      // delivers to any recipient (ADMIN_EMAIL and BCC'd extras like Heather),
+      // not just the Resend account owner.
       from: 'Benjuicey Feedback <feedback@whatadisaster.uk>',
       to: adminEmail,
-      cc: cc.length ? cc : undefined,
+      bcc: bcc.length ? bcc : undefined,
       reply_to: sub.email || undefined,
       subject: `[${sub.ref}] New ${sub.type} feedback — ${sub.appName}`,
       html: `<p><strong>${escapeHtml(sub.appName)}</strong> — new <strong>${escapeHtml(sub.type)}</strong> feedback (${sub.ref})</p>
