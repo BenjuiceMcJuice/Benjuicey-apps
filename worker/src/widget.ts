@@ -32,6 +32,10 @@ export const WIDGET_JS = `
     + 'border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#eee;padding:.55rem .65rem;font-size:.88rem;'
     + 'font-family:inherit;}'
     + '.bjfw-field textarea{resize:vertical;min-height:90px;}'
+    + '.bjfw-consent{display:none;align-items:flex-start;gap:.5rem;margin:-.25rem 0 .85rem;}'
+    + '.bjfw-consent.bjfw-show{display:flex;}'
+    + '.bjfw-consent input{width:auto;margin:.15rem 0 0;flex:none;cursor:pointer;}'
+    + '.bjfw-consent label{font-size:.78rem;color:#bbb;text-transform:none;letter-spacing:0;font-weight:400;margin:0;line-height:1.4;cursor:pointer;}'
     + '.bjfw-submit{width:100%;background:' + accent + ';color:#fff;border:none;border-radius:8px;padding:.7rem;'
     + 'font-size:.9rem;font-weight:600;cursor:pointer;}'
     + '.bjfw-submit:disabled{opacity:.6;cursor:default;}'
@@ -52,6 +56,7 @@ export const WIDGET_JS = `
     + '<form id="bjfwForm">'
     + '<div class="bjfw-field"><label for="bjfwName">Your name</label><input type="text" id="bjfwName" required autocomplete="name"></div>'
     + '<div class="bjfw-field"><label for="bjfwEmail">Your email (optional)</label><input type="email" id="bjfwEmail" autocomplete="email"></div>'
+    + '<div class="bjfw-consent" id="bjfwConsentWrap"><input type="checkbox" id="bjfwConsent"><label for="bjfwConsent">I\\'m happy to be contacted about this feedback.</label></div>'
     + '<div class="bjfw-field"><label for="bjfwType">What\\'s this about</label><select id="bjfwType">'
     + '<option value="bug">found a bug</option><option value="content">something\\'s wrong / unclear</option>'
     + '<option value="request">feature or content suggestion</option><option value="general">general feedback</option>'
@@ -82,6 +87,15 @@ export const WIDGET_JS = `
     document.body.style.overflow = '';
   }
 
+  // The "OK to contact me" tick only makes sense once an email is given, so it
+  // stays hidden until the email field has a value.
+  var emailEl = document.getElementById('bjfwEmail');
+  var consentWrap = document.getElementById('bjfwConsentWrap');
+  emailEl.addEventListener('input', function(){
+    if (emailEl.value.trim()) consentWrap.classList.add('bjfw-show');
+    else consentWrap.classList.remove('bjfw-show');
+  });
+
   document.getElementById('bjfwForm').addEventListener('submit', function(e){
     e.preventDefault();
     var errorEl = document.getElementById('bjfwError');
@@ -90,12 +104,15 @@ export const WIDGET_JS = `
     submitBtn.disabled = true;
     submitBtn.textContent = 'Sending…';
 
+    var emailVal = emailEl.value;
     var data = {
       appId: appId,
       name: document.getElementById('bjfwName').value,
-      email: document.getElementById('bjfwEmail').value,
+      email: emailVal,
       type: document.getElementById('bjfwType').value,
-      message: document.getElementById('bjfwMessage').value
+      message: document.getElementById('bjfwMessage').value,
+      // Only meaningful with an email; false when none was given.
+      contactConsent: !!emailVal.trim() && document.getElementById('bjfwConsent').checked
     };
 
     fetch(API + '/submit', {
@@ -110,6 +127,7 @@ export const WIDGET_JS = `
         document.getElementById('bjfwFormWrap').style.display = 'none';
         document.getElementById('bjfwSuccessWrap').style.display = 'block';
         document.getElementById('bjfwForm').reset();
+        consentWrap.classList.remove('bjfw-show');
         window.dispatchEvent(new CustomEvent('benjuiceyfeedback:submitted', { detail: { appId: appId, ref: result.json.ref, type: data.type } }));
       } else {
         errorEl.style.display = 'block';

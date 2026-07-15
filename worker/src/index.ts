@@ -69,9 +69,11 @@ export default {
     if (request.method === 'POST' && url.pathname === '/submit') {
       try {
         const body = (await request.json()) as {
-          appId?: string; name?: string; email?: string; type?: string; message?: string
+          appId?: string; name?: string; email?: string; type?: string; message?: string; contactConsent?: boolean
         }
-        const { appId, name, email, type, message } = body
+        const { appId, name, email, type, message, contactConsent } = body
+        // Consent is only meaningful when an email was actually given.
+        const consent = Boolean(contactConsent) && Boolean(email?.trim())
 
         if (!appId || !name?.trim() || !message?.trim()) {
           return new Response(JSON.stringify({ error: 'Missing required fields' }), {
@@ -90,6 +92,7 @@ export default {
         const ref = await createSubmission(env.FIRESTORE_PROJECT_ID, token, trigram, {
           appId, trigram, type: type ?? 'general', status: 'open',
           name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
+          contactConsent: consent,
           timestamp: new Date(), notes: '',
         })
 
@@ -99,6 +102,7 @@ export default {
           const notify = {
             ref, appName: APP_NAMES[appId] ?? appId, type: type ?? 'general',
             name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
+            contactConsent: consent,
           }
           // Per-app extra notifiers (e.g. Heather for What a Disaster). They're
           // BCC'd on the admin notification (address kept private) and named as

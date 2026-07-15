@@ -12,6 +12,7 @@ interface Submission {
   status: string
   name: string
   email: string
+  contactConsent?: boolean
   message: string
   timestamp: string
   notes: string
@@ -451,6 +452,11 @@ export default function Admin() {
                       <div className="retro-font" style={{ fontSize: 20 }}>
                         {sub.name}{sub.email ? ` — ${sub.email}` : ' (no email)'}
                       </div>
+                      {sub.email && (
+                        <div className="retro-font" style={{ fontSize: 14, marginTop: 4, color: sub.contactConsent ? '#27ae60' : '#e67e22' }}>
+                          {sub.contactConsent ? '✓ OK to contact' : '✕ did NOT consent to contact — do not reply'}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>MESSAGE</div>

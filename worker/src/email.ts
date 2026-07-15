@@ -26,12 +26,18 @@ function resendKey(apiKey: string): string | null {
 export async function sendAdminNotification(
   apiKey: string,
   adminEmail: string,
-  sub: { ref: string; appName: string; type: string; name: string; email: string; message: string },
+  sub: { ref: string; appName: string; type: string; name: string; email: string; message: string; contactConsent?: boolean },
   extraRecipients: { email: string; name: string }[] = [],
 ): Promise<void> {
   const key = resendKey(apiKey)
   if (!key || !adminEmail) return // Resend not configured — skip silently
   const from = sub.email ? escapeHtml(sub.name) + ' &lt;' + escapeHtml(sub.email) + '&gt;' : escapeHtml(sub.name) + ' (no email given)'
+  // Tell the reader whether they're allowed to reply to this person.
+  const consentLine = sub.email
+    ? (sub.contactConsent
+        ? `<p style="color:#16a34a">✓ Happy to be contacted — you may reply.</p>`
+        : `<p style="color:#b45309">✕ Did not opt in to being contacted — please don't reply directly.</p>`)
+    : ''
   const bcc = extraRecipients.map(r => r.email).filter(Boolean)
   const notifiedLine = extraRecipients.length
     ? `<p style="color:#555">🔔 ${extraRecipients.map(r => escapeHtml(r.name)).join(', ')} ${extraRecipients.length > 1 ? 'have' : 'has'} also been notified of this ${escapeHtml(sub.appName)} feedback.</p>`
@@ -46,11 +52,12 @@ export async function sendAdminNotification(
       from: 'Benjuicey Feedback <feedback@whatadisaster.uk>',
       to: adminEmail,
       bcc: bcc.length ? bcc : undefined,
-      reply_to: sub.email || undefined,
+      // Only make one-tap reply available if they opted in to being contacted.
+      reply_to: sub.contactConsent && sub.email ? sub.email : undefined,
       subject: `[${sub.ref}] New ${sub.type} feedback — ${sub.appName}`,
       html: `<p><strong>${escapeHtml(sub.appName)}</strong> — new <strong>${escapeHtml(sub.type)}</strong> feedback (${sub.ref})</p>
 <p><strong>From:</strong> ${from}</p>
-<p><strong>Message:</strong></p>
+${consentLine}<p><strong>Message:</strong></p>
 <blockquote style="border-left:3px solid #ccc;padding-left:12px;color:#333">${escapeHtml(sub.message)}</blockquote>
 ${notifiedLine}<p>Manage it in the admin dashboard.</p>`,
     }),

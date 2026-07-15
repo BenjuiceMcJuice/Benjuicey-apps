@@ -60,6 +60,7 @@ Each submission is one document at `submissions/{ref}`:
 | `status` | `open` | Worker (always starts `open`) |
 | `name` | `Jane` | the user |
 | `email` | `jane@…` (may be blank) | the user |
+| `contactConsent` | `true` / `false` | the user (tick — only when an email is given) |
 | `message` | free text | the user |
 | `timestamp` | date/time | Worker |
 | `notes` | `` (empty) | you, later, in the admin dashboard |

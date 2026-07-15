@@ -210,3 +210,28 @@ dropped by Resend until a **domain is verified** on Resend and the `from:` is
 switched off `onboarding@resend.dev`. Routing/UX is live; delivery to Heather
 waits on that single Resend step. Also: set `WDA_NOTIFY_EMAIL` to Heather's real
 address (var or `wrangler secret put WDA_NOTIFY_EMAIL`) + `wrangler deploy`.
+
+## 2026-07-15 — Session (cont.): contact-consent tick
+
+### What & why
+When a submitter leaves an email, they can now tick "I'm happy to be contacted
+about this feedback." Gives explicit consent before anyone replies — cleaner
+for data protection and for deciding whether to email someone back.
+
+### What got built
+- **Shared widget** (`worker/src/widget.ts`): checkbox that reveals only once
+  the email field has a value; sends `contactConsent` in the POST. Because every
+  app embeds this one hosted `/widget.js`, the tick rolls out to all of them from
+  this single change — no per-app edits needed.
+- **Worker** (`index.ts`): reads `contactConsent`, stores it on the submission
+  (forced false when no email), and passes it to the notification.
+- **Notification email** (`email.ts`): shows "✓ Happy to be contacted — you may
+  reply" or "✕ Did not opt in — please don't reply", and only sets `reply_to`
+  when consent was given.
+- **Admin dashboard** (`app/admin/page.tsx`): shows the consent status under the
+  From line so you can see at a glance whether a reply is allowed.
+- **Portfolio contact form** (`app/contact/page.tsx`): same tick (separate
+  hand-built form, so updated directly).
+- Firestore layer needed no change — `contactConsent` is a plain boolean and the
+  generic field encoder already handles booleans.
+- Typecheck clean for both the Worker and the Next app.

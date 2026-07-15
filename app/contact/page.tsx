@@ -7,18 +7,25 @@ type Status = 'idle' | 'submitting' | 'success' | 'error'
 export default function Contact() {
   const [status, setStatus] = useState<Status>('idle')
   const [ref, setRef] = useState('')
+  // The "OK to contact me" tick is only relevant once an email is given.
+  const [hasEmail, setHasEmail] = useState(false)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setStatus('submitting')
 
     const form = e.currentTarget
+    const email = (form.elements.namedItem('email') as HTMLInputElement).value
     const data = {
       appId: 'portfolio',
       name: (form.elements.namedItem('name') as HTMLInputElement).value,
-      email: (form.elements.namedItem('email') as HTMLInputElement).value,
+      email,
       type: (form.elements.namedItem('type') as HTMLSelectElement).value,
       message: (form.elements.namedItem('message') as HTMLTextAreaElement).value,
+      // Only meaningful with an email; false when none was given.
+      contactConsent:
+        !!email.trim() &&
+        (form.elements.namedItem('contactConsent') as HTMLInputElement).checked,
     }
 
     try {
@@ -94,8 +101,18 @@ export default function Contact() {
               name="email"
               placeholder="if you want a reply"
               autoComplete="email"
+              onChange={e => setHasEmail(!!e.target.value.trim())}
             />
           </div>
+
+          {hasEmail && (
+            <div className="form-field" style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+              <input type="checkbox" id="contactConsent" name="contactConsent" style={{ width: 'auto', marginTop: '0.2rem' }} />
+              <label className="retro-font" htmlFor="contactConsent" style={{ fontSize: '0.85rem', lineHeight: 1.4 }}>
+                i&apos;m happy to be contacted about this feedback.
+              </label>
+            </div>
+          )}
 
           <div className="form-field">
             <label className="form-label pixel-font" htmlFor="type">
