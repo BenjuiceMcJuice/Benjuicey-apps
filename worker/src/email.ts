@@ -42,11 +42,10 @@ export async function sendAdminNotification(
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      // TODO: swap to a verified domain once DNS is set up on Resend.
-      // Until then, onboarding@resend.dev only delivers to the Resend
-      // account owner's own email — so ADMIN_EMAIL must be that address, and
-      // `cc` recipients (e.g. Heather) won't actually receive mail yet.
-      from: 'Benjuicey Feedback <onboarding@resend.dev>',
+      // Sends from the verified whatadisaster.uk domain on Resend, so mail
+      // delivers to any recipient (ADMIN_EMAIL and `cc`s like Heather), not
+      // just the Resend account owner.
+      from: 'Benjuicey Feedback <feedback@whatadisaster.uk>',
       to: adminEmail,
       cc: cc.length ? cc : undefined,
       reply_to: sub.email || undefined,
@@ -80,8 +79,7 @@ export async function sendConfirmation(
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      // TODO: replace with a verified domain once DNS is set up on Resend
-      from: 'Ben <onboarding@resend.dev>',
+      from: 'Ben <feedback@whatadisaster.uk>',
       to,
       subject: `[${ref}] Got your message`,
       html: `<p>Hi ${escapeHtml(name)},</p>
