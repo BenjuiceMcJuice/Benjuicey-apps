@@ -22,6 +22,7 @@ Turn this portfolio site into a centralised platform: public-facing app director
   - [ ] Send confirmation email to user — skipped for now, needs verified Resend domain
   - [x] Return success/error response
 - [x] Add CORS headers so any app can call the Worker
+- [ ] **Make `email` mandatory on all feedback** — Ben wants every submission to carry an email so submitters can always be contacted back (raised 2026-07-15 after the first real feedback came in with no way to reply). Currently optional; requires: Worker validation (`worker/src/index.ts` `/submit`), the shared widget form (`worker/src/widget.ts`), `ai-literate`'s bespoke modal, the portfolio `/contact` form, and updating the schema doc (`docs/feedback-standard.md`, where `email` is listed as optional).
 - [ ] Add basic rate limiting to prevent spam
 - [x] Update portfolio contact form to POST to Worker instead of Formspree
 - [x] Test end-to-end: submit → Firestore ✓ (email skipped)
