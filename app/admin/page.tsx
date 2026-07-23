@@ -50,8 +50,9 @@ const COLUMNS: Column[] = [
   { key: 'timestamp', label: 'LOGGED', track: '104px' },
 ]
 
-const GRID_TEMPLATE = COLUMNS.map(c => c.track).join(' ') + ' 34px'
-const GRID_MIN_WIDTH = 940
+// Leading 36px track = row-selection checkbox; trailing 34px = expand chevron.
+const GRID_TEMPLATE = '36px ' + COLUMNS.map(c => c.track).join(' ') + ' 34px'
+const GRID_MIN_WIDTH = 976
 
 // ─── wildcard filtering ──────────────────────────────────────────────
 // Empty filter matches everything. A filter containing `*` is treated as a
@@ -94,6 +95,9 @@ export default function Admin() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [editNotes, setEditNotes] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
+  // Refs the user has ticked for bulk actions.
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkSaving, setBulkSaving] = useState(false)
 
   const fetchSubmissions = useCallback(async (pw: string) => {
     setLoading(true)
@@ -143,6 +147,27 @@ export default function Admin() {
     setSubmissions(s => s.map(sub => sub.ref === ref ? { ...sub, status } : sub))
   }
 
+  async function bulkUpdateStatus(status: string) {
+    const refs = [...selected]
+    if (refs.length === 0) return
+    setBulkSaving(true)
+    const pw = sessionStorage.getItem('admin-pw')!
+    const refSet = new Set(refs)
+    try {
+      await Promise.all(refs.map(ref =>
+        fetch(`${API}/admin/submissions/${ref}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
+          body: JSON.stringify({ status }),
+        }),
+      ))
+      setSubmissions(s => s.map(sub => (refSet.has(sub.ref) ? { ...sub, status } : sub)))
+      setSelected(new Set())
+    } finally {
+      setBulkSaving(false)
+    }
+  }
+
   async function saveNotes(ref: string) {
     setSaving(ref)
     const pw = sessionStorage.getItem('admin-pw')!
@@ -190,6 +215,27 @@ export default function Admin() {
       return String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? '')) * dir
     })
   }, [submissions, filters, sortKey, sortDir])
+
+  const allVisibleSelected = filtered.length > 0 && filtered.every(s => selected.has(s.ref))
+  const someVisibleSelected = filtered.some(s => selected.has(s.ref))
+
+  function toggleSelect(ref: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(ref)) next.delete(ref)
+      else next.add(ref)
+      return next
+    })
+  }
+
+  function toggleSelectAllVisible() {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (allVisibleSelected) filtered.forEach(s => next.delete(s.ref))
+      else filtered.forEach(s => next.add(s.ref))
+      return next
+    })
+  }
 
   const stats = [
     { label: 'total', value: submissions.length, color: 'var(--color-dark)' },
@@ -304,6 +350,48 @@ export default function Admin() {
         </p>
       </div>
 
+      {/* Bulk action bar — appears once rows are ticked */}
+      {selected.size > 0 && (
+        <div
+          className="pixel-box"
+          style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', padding: '12px 16px' }}
+        >
+          <span className="retro-font" style={{ fontSize: 19, fontWeight: 'bold' }}>
+            {selected.size} selected
+          </span>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="retro-font" style={{ fontSize: 17, color: 'var(--color-muted)' }}>set status →</span>
+            {STATUS_OPTIONS.map(s => (
+              <button
+                key={s}
+                onClick={() => bulkUpdateStatus(s)}
+                disabled={bulkSaving}
+                className="retro-font"
+                style={{
+                  padding: '6px 14px', border: `3px solid ${STATUS_COLORS[s]}`, fontSize: 17,
+                  background: 'var(--color-bg)', color: STATUS_COLORS[s],
+                  cursor: bulkSaving ? 'default' : 'pointer', opacity: bulkSaving ? 0.5 : 1,
+                }}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          {bulkSaving && <span className="retro-font" style={{ fontSize: 17 }}>saving…</span>}
+          <button
+            onClick={() => setSelected(new Set())}
+            disabled={bulkSaving}
+            className="retro-font"
+            style={{
+              marginLeft: 'auto', padding: '6px 14px', border: '3px solid var(--color-dark)',
+              fontSize: 17, background: 'var(--color-bg)', cursor: bulkSaving ? 'default' : 'pointer',
+            }}
+          >
+            clear selection
+          </button>
+        </div>
+      )}
+
       {loading && <p className="retro-font" style={{ fontSize: 22, color: 'var(--color-muted)' }}>loading...</p>}
       {error && <p className="retro-font" style={{ fontSize: 20, color: 'red' }}>{error}</p>}
 
@@ -317,6 +405,16 @@ export default function Admin() {
               background: 'var(--color-dark)', color: 'var(--color-card)',
             }}
           >
+            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                ref={el => { if (el) el.indeterminate = !allVisibleSelected && someVisibleSelected }}
+                onChange={toggleSelectAllVisible}
+                title="select all shown"
+                style={{ width: 16, height: 16, cursor: 'pointer' }}
+              />
+            </span>
             {COLUMNS.map(c => {
               const active = sortKey === c.key
               return (
@@ -348,6 +446,7 @@ export default function Admin() {
               borderBottom: '3px solid var(--color-dark)', background: '#ede8dc',
             }}
           >
+            <span />
             {COLUMNS.map(c => (
               <div key={c.key} style={{ padding: '7px 8px' }}>
                 <input
@@ -389,6 +488,18 @@ export default function Admin() {
                     background: isOpen ? '#ede8dc' : (i % 2 ? 'rgba(44,44,58,0.03)' : 'transparent'),
                   }}
                 >
+                  <span
+                    onClick={e => e.stopPropagation()}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '11px 0' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.has(sub.ref)}
+                      onChange={() => toggleSelect(sub.ref)}
+                      title="select ticket"
+                      style={{ width: 16, height: 16, cursor: 'pointer' }}
+                    />
+                  </span>
                   <span className="retro-font" style={{ padding: '11px 12px', fontSize: 16, fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                     {sub.ref}
                   </span>
