@@ -275,12 +275,12 @@ export default function Admin() {
   return (
     <main className="page-wrapper">
       {/* Header */}
-      <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
+      <div className="admin-header">
         <div className="hero pixel-box" style={{ flex: 1 }}>
           <h1 className="hero-title pixel-font">fault console</h1>
           <p className="hero-sub retro-font">{submissions.length} tickets across {appCount} apps</p>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="admin-header-actions">
           <button
             className="retro-font"
             onClick={() => fetchSubmissions(sessionStorage.getItem('admin-pw')!)}
@@ -299,7 +299,7 @@ export default function Admin() {
       </div>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+      <div className="admin-stats">
         {stats.map(s => (
           <div key={s.label} className="pixel-box" style={{ padding: '16px 20px', textAlign: 'center' }}>
             <div className="pixel-font" style={{ fontSize: 22, color: s.color, marginBottom: 8 }}>{s.value}</div>
