@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Press_Start_2P, VT323 } from 'next/font/google'
 import './globals.css'
 import { Nav } from '@/components/Nav'
@@ -20,6 +20,15 @@ const vt323 = VT323({
 export const metadata: Metadata = {
   title: "Benjuicey's Apps",
   description: 'A collection of apps, tools, and experiments made by Benjuicey.',
+}
+
+// viewportFit: 'cover' lets the layout reach under the notch/home indicator —
+// the safe-area padding in globals.css keeps content clear of both.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#f4ede0',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

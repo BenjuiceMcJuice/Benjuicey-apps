@@ -181,3 +181,54 @@ Desk that triages every item into the right ITIL process:
 - Rollout is phased and each phase is independently shippable; open decisions for
   Ben are listed at the end. Explicitly out of scope: CMDB, asset mgmt, CAB —
   ITIL as vocabulary, not a framework to implement wholesale.
+
+---
+
+## 2026-07-24 — Fault console on iOS: card list + ticket modal
+
+The console was still built around the 976px-wide fault table on a phone —
+usable only via a sideways scroll inside a bordered box, with seven column
+filter inputs and an inline expander that pushed the form off-screen. Rebuilt
+the small-screen experience and turned the ticket detail into a proper form.
+
+**Phone layout (`≤760px`)**
+- The table is swapped for a **ticket card list** — ref + status pill, a
+  `app · type · date · from` meta line, and a two-line message clamp. Whole
+  card is one tap target; the selection checkbox sits in its own padded hit
+  area so ticking doesn't open the ticket.
+- The seven column filters become **one search box** (same `*` wildcard rules,
+  matched across every column plus the email) and a **sort field + direction**
+  pair. Column filters stay on desktop.
+- The stat tiles are hidden on phones — the status chips now carry the same
+  counts (`open 3`), so the chrome above the first ticket is roughly half what
+  it was. On desktop the tiles remain, and are now buttons that set the status
+  filter.
+
+**Ticket modal (all sizes)**
+- Clicking a row/card opens a dialog instead of expanding the row: full detail,
+  a segmented status picker, and a notes textarea. Centred panel on desktop,
+  **bottom sheet** on phones.
+- Edits are **drafted locally and committed with SAVE** in a single PATCH
+  (status + notes together) — a mis-tap can no longer silently re-status a
+  ticket, which the old instant-apply `<select>` allowed. Closing or stepping
+  to another ticket with unsaved edits shows a `discard / keep editing / save`
+  bar rather than losing the edit.
+- `‹ ›` walk the filtered list; Esc and backdrop-click close (guarded when
+  dirty). A ticket that drops out of the current filter after saving (marking
+  it done while filtered to open) **keeps the sheet open** and says so.
+
+**iOS specifics**
+- `viewport-fit=cover` + `env(safe-area-inset-*)` padding on nav, page and
+  sheet footer; `theme-color` tints Safari's chrome.
+- Body scroll-lock uses the `position: fixed` + restore-scroll technique —
+  iOS Safari ignores `overflow: hidden` on `<body>`.
+- Every input is ≥16px (iOS zooms the page on focus below that), tap targets
+  are ≥40px, `-webkit-text-size-adjust: 100%` stops rotation text inflation,
+  and `touch-action: manipulation` / `-webkit-tap-highlight-color: transparent`
+  kill the tap delay and grey flash.
+- Sheet body uses `dvh` (with a `vh` fallback) and `overscroll-behavior:
+  contain` so scrolling the sheet doesn't drag the page behind it.
+
+Verified with `next build` plus a headless iPhone-13-viewport pass over the
+real page (mocked API): save sends one combined PATCH, scroll position is
+restored on close, search/sort/bulk-select all behave.
