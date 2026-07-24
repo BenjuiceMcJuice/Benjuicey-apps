@@ -395,4 +395,43 @@
       padding: 24px 22px;
     }
   }
+
+  /* ─── admin / fault console layout ─── */
+  .admin-header {
+    display: flex;
+    gap: 16px;
+    align-items: stretch;
+  }
+
+  .admin-header-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .admin-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+
+  /* Portrait phones: stack the header and drop stats to a 2×2 grid so the
+     cards stop squashing (e.g. "in progress" no longer wraps mid-word). */
+  @media (max-width: 640px) {
+    .admin-header {
+      flex-direction: column;
+    }
+
+    .admin-header-actions {
+      flex-direction: row;
+    }
+
+    .admin-header-actions > button {
+      flex: 1;
+    }
+
+    .admin-stats {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
 }
