@@ -604,14 +604,11 @@ export default function Admin() {
             </button>
           </div>
         </div>
-        <p className="retro-font" style={{ fontSize: 16, color: 'var(--color-muted)' }}>
-          tip: filter any column — use <strong>*</strong> as a wildcard (e.g. <code>WDA-*</code>, <code>*dark mode*</code>). click a header to sort.
-        </p>
-        {/* The lifecycle rules used to be spelled out here. They're enforced by
-            the controls themselves — unsettable statuses are greyed out, the
-            resolve action demands a closure code, resolved rows show their own
-            countdown — so the paragraph was just noise above the table.
-            Written up in docs/feedback-how-it-works.md instead. */}
+        {/* No explainer text above the table. The lifecycle rules are enforced
+            by the controls themselves, and the wildcard filter syntax is
+            surfaced on the inputs (placeholder + tooltip) rather than in a
+            paragraph nobody re-reads. Both are written up in
+            docs/feedback-how-it-works.md. */}
       </div>
 
       {/* Bulk action bar — appears once rows are ticked */}
@@ -741,6 +738,9 @@ export default function Admin() {
                   value={filters[c.key]}
                   onChange={e => setFilter(c.key, e.target.value)}
                   placeholder="filter *"
+                  // Carries the wildcard hint that used to be a paragraph above
+                  // the table — available where it's used, invisible until then.
+                  title={`filter ${c.label.toLowerCase()} — * is a wildcard (WDA-*, *dark mode*)`}
                   className="retro-font"
                   style={{
                     width: '100%', fontSize: 15, padding: '5px 7px',
