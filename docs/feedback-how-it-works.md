@@ -63,6 +63,7 @@ Each submission is one document at `submissions/{ref}`:
 | `message` | free text | the user |
 | `timestamp` | date/time | Worker |
 | `notes` | `` (empty) | you, later, in the admin dashboard |
+| `closureCode` | `fixed` or null | Worker, when status → `resolved` (required — see below) |
 | `resolvedAt` | date/time or null | Worker, when status → `resolved` (starts the auto-close clock) |
 | `closedAt` | date/time or null | Worker, when the ticket closes |
 | `autoClosed` | `true` / `false` / null | Worker (`true` = closed by the 7-day sweep) |
@@ -96,6 +97,37 @@ new ──▶ in-progress ──▶ resolved ──(7 days)──▶ closed
 "still on my plate" list. `open` is a *bucket*, not a status; nothing is ever
 stored with a status of `open`.
 
+### Closure codes — *why* a ticket ended
+
+Resolving a ticket always says why. The code is stored on `closureCode`, shown
+in the dashboard's **CLOSURE** column (filterable and sortable like any other),
+and carries through to `closed`:
+
+| Code | Use it when |
+|---|---|
+| `fixed` | it was broken, now it works |
+| `implemented` | the requested thing was built or added |
+| `answered` | a question or comment answered — nothing to change |
+| `wont-fix` | real, understood, deliberately not doing it |
+| `duplicate` | already covered by another ticket |
+| `cannot-reproduce` | couldn't make it happen; nothing to fix |
+| `spam` | not a genuine submission |
+| `unspecified` | **not selectable** — backfilled onto tickets resolved before codes existed |
+
+The Worker **requires** a code in the same request that sets `resolved`, so a
+finished ticket can't exist with no explanation. In the dashboard, choosing
+"resolved" therefore doesn't save immediately: it arms a closure-code picker
+next to the status, and the two are sent together when you confirm. The bulk
+bar works the same way — a "resolve as…" picker rather than a plain button.
+
+Afterwards the code can be corrected on its own (a `closureCode`-only PATCH),
+which does **not** touch the status or restart the auto-close clock. Reopening a
+ticket clears the code, since it no longer applies.
+
+This is also where the retired `wont-fix` *status* went: it was never really a
+state, it was a reason. Old `wont-fix` records keep that meaning — the sweep
+migrates them to `closed` with `closureCode: wont-fix`.
+
 ### Auto-close after 7 days
 
 You can't mark a ticket `closed` yourself — the dashboard doesn't offer it and
@@ -120,7 +152,10 @@ a ticket can't be closed twice:
 The same sweep rewrites records from the pre-redesign four-status system
 (`open` → `new`, `done` → `resolved`, `wont-fix` → `closed`) the first time it
 sees them, so no manual migration was needed. A legacy `done` gets its 7-day
-clock started at that moment rather than closing instantly.
+clock started at that moment rather than closing instantly, and picks up
+`closureCode: unspecified`; a legacy `wont-fix` keeps its meaning as
+`closureCode: wont-fix`. Tickets that migrate to `new` stay codeless — only a
+finished ticket carries a closure code.
 
 ---
 
@@ -154,8 +189,9 @@ The portfolio site has a private admin page: **`https://benjuicey-apps.pages.dev
 - Stat tiles: total / open / new / work in progress / pending / resolved — each tile is also a shortcut to that view
 - Views: **all**, **open** (the default — everything not resolved or closed), then one per status
 - Wildcard filters and click-to-sort on every column, plus multi-select for bulk status changes
-- Click any item to read the full message, change its **status**, and add private **internal notes**
+- Click any item to read the full message, change its **status** and **closure code**, and add private **internal notes**
 - A `resolved` ticket shows how long until it auto-closes (`·4d` in the table, spelled out in the detail panel). `closed` isn't offered as a choice — see the lifecycle above.
+- The **CLOSURE** column shows why each finished ticket ended (`—` while it's still open), so `*won't*` in that column's filter is "everything I decided not to do"
 
 That's the whole management surface — it reads and writes through the Worker's admin endpoints.
 
@@ -179,6 +215,20 @@ curl -X PATCH https://benjuicey-feedback.benjuicemcjuice.workers.dev/admin/submi
 — including `closed` and the retired `open` / `done` / `wont-fix` — gets a 400
 with an explanation. Setting `resolved` returns the `resolvedAt` it stamped, so
 a caller can work out the auto-close date without a second request.
+
+**Resolving must include a closure code** in the same request, or it's a 400:
+
+```bash
+# Resolve, saying why
+curl -X PATCH .../admin/submissions/WDA-0001 \
+  -H "x-admin-password: YOUR_ADMIN_PASSWORD" -H "Content-Type: application/json" \
+  -d '{"status":"resolved","closureCode":"cannot-reproduce"}'
+
+# Correct just the code later — status and the auto-close clock are untouched
+curl -X PATCH .../admin/submissions/WDA-0001 \
+  -H "x-admin-password: YOUR_ADMIN_PASSWORD" -H "Content-Type: application/json" \
+  -d '{"closureCode":"fixed"}'
+```
 
 > **The admin password is a secret.** It lives only as the `ADMIN_PASSWORD` secret in Cloudflare. Do not commit it to any repo. Provide it to Claude at the moment you ask for a triage run; Claude does not and should not store it.
 

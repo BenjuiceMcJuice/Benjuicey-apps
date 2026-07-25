@@ -41,12 +41,14 @@ email. Full write-up: **`docs/feedback-how-it-works.md`**; rules/schema:
   them on; placeholders are ignored). Formspree was tried and retired — it
   spam-filters the Worker's server-side POSTs so no email ever fires (see
   DEVLOG 2026-07-14 session 2). Resend is the supported path.
-- **Ticket statuses live in one file: `lib/status.ts`** — imported by both the
-  Worker and the `/admin` dashboard, so never hardcode a status string in either.
-  The lifecycle is `new` → `in-progress` / `pending` → `resolved` → `closed`;
-  "open" is a *view* (anything not resolved/closed), not a stored value; and
-  `closed` is set **only** by the 7-day auto-close sweep (`worker/src/sweep.ts`) —
-  the Worker rejects a hand-set `closed`. Rules: `docs/feedback-how-it-works.md`.
+- **Ticket statuses and closure codes live in one file: `lib/status.ts`** —
+  imported by both the Worker and the `/admin` dashboard, so never hardcode
+  either string in either place. The lifecycle is `new` → `in-progress` /
+  `pending` → `resolved` → `closed`; "open" is a *view* (anything not
+  resolved/closed), not a stored value; `closed` is set **only** by the 7-day
+  auto-close sweep (`worker/src/sweep.ts`) — the Worker rejects a hand-set
+  `closed`; and resolving **requires** a `closureCode` (`fixed`, `wont-fix`,
+  `duplicate`, …) in the same request. Rules: `docs/feedback-how-it-works.md`.
 - A browser submission only reaches the Worker if the app's origin is in
   `ALLOWED_ORIGINS` (`worker/wrangler.toml`). Add an origin here **only** for a
   live portfolio app — and use its *real* origin (Dungeon of Montor is on

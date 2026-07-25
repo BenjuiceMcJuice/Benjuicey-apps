@@ -4,7 +4,9 @@ import { sendConfirmation, sendAdminNotification } from './email'
 import { getTrigram, APP_NAMES } from './trigrams'
 import { WIDGET_JS } from './widget'
 import { runStatusSweep } from './sweep'
-import { AUTO_CLOSE_DAYS, isStatus, SETTABLE_STATUSES } from '../../lib/status'
+import {
+  AUTO_CLOSE_DAYS, SELECTABLE_CLOSURE_CODES, SETTABLE_STATUSES, isClosureCode, isStatus,
+} from '../../lib/status'
 
 export interface Env {
   GOOGLE_SERVICE_ACCOUNT_JSON: string
@@ -81,7 +83,7 @@ export default {
           appId, trigram, type: type ?? 'general', status: 'new',
           name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
           timestamp: new Date(), notes: '',
-          resolvedAt: null, closedAt: null, autoClosed: null,
+          closureCode: null, resolvedAt: null, closedAt: null, autoClosed: null,
         })
 
         // Emails are best-effort — a failure here must NOT fail a submission
@@ -152,36 +154,55 @@ export default {
     if (request.method === 'PATCH' && url.pathname.startsWith('/admin/submissions/')) {
       try {
         const ref = url.pathname.split('/').pop()!
-        const body = (await request.json()) as { status?: string; notes?: string }
+        const body = (await request.json()) as {
+          status?: string; notes?: string; closureCode?: string
+        }
         const patch: SubmissionUpdate = {}
+        const bad = (error: string) => new Response(JSON.stringify({ error }), {
+          status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
+        })
 
         if (body.notes !== undefined) patch.notes = String(body.notes)
+
+        // A closure code on its own is how you correct the "why" of an
+        // already-resolved (or closed) ticket without touching its status or
+        // restarting the auto-close clock.
+        if (body.closureCode !== undefined && !isClosureCode(body.closureCode)) {
+          return bad(`Unknown closure code "${body.closureCode}". Valid values: ${SELECTABLE_CLOSURE_CODES.join(', ')}.`)
+        }
+        if (body.closureCode !== undefined) patch.closureCode = body.closureCode
 
         if (body.status !== undefined) {
           const status = body.status
           if (status === 'closed') {
-            return new Response(JSON.stringify({
-              error: `Cannot set "closed" directly — mark the ticket "resolved" and it auto-closes after ${AUTO_CLOSE_DAYS} days.`,
-            }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } })
+            return bad(`Cannot set "closed" directly — mark the ticket "resolved" and it auto-closes after ${AUTO_CLOSE_DAYS} days.`)
           }
           if (!isStatus(status) || !SETTABLE_STATUSES.includes(status)) {
-            return new Response(JSON.stringify({
-              error: `Unknown status "${status}". Valid values: ${SETTABLE_STATUSES.join(', ')}.`,
-            }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } })
+            return bad(`Unknown status "${status}". Valid values: ${SETTABLE_STATUSES.join(', ')}.`)
+          }
+          // Resolving must say why, in the same request — otherwise a ticket
+          // could end up finished with no explanation, which is the whole
+          // point of the field.
+          if (status === 'resolved' && patch.closureCode == null) {
+            return bad(`Resolving needs a closure code. Send one of: ${SELECTABLE_CLOSURE_CODES.join(', ')}.`)
           }
           patch.status = status
           // Resolving (re-resolving too) starts the auto-close clock;
           // moving back to any other state clears it, so a reopened ticket
-          // isn't closed by a stale timestamp.
-          patch.resolvedAt = status === 'resolved' ? new Date() : null
+          // isn't closed by a stale timestamp — and loses a closure code
+          // that no longer applies.
+          if (status === 'resolved') {
+            patch.resolvedAt = new Date()
+          } else {
+            patch.resolvedAt = null
+            patch.closureCode = null
+          }
           patch.closedAt = null
           patch.autoClosed = null
         }
 
-        if (patch.status === undefined && patch.notes === undefined) {
-          return new Response(JSON.stringify({ error: 'Nothing to update' }), {
-            status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
-          })
+        if (patch.status === undefined && patch.notes === undefined && patch.closureCode === undefined) {
+          return bad('Nothing to update')
         }
 
         const token = await authToken(env)
@@ -189,6 +210,7 @@ export default {
         return new Response(JSON.stringify({
           success: true,
           status: patch.status,
+          closureCode: patch.closureCode,
           // Lets the dashboard show the auto-close countdown without a refetch.
           resolvedAt: patch.resolvedAt instanceof Date ? patch.resolvedAt.toISOString() : null,
         }), {

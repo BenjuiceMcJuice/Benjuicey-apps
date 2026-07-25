@@ -113,6 +113,7 @@ export async function listSubmissions(
 export interface SubmissionUpdate {
   status?: string
   notes?: string
+  closureCode?: string | null
   resolvedAt?: Date | null
   closedAt?: Date | null
   autoClosed?: boolean | null

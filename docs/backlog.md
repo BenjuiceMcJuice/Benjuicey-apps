@@ -41,6 +41,9 @@ submissions/{ref}
   message:    string
   timestamp:  datetime
   notes:      string   // internal notes, not visible to submitter
+  closureCode:string | null     // why it ended: fixed | implemented | answered |
+                                // wont-fix | duplicate | cannot-reproduce | spam
+                                // (required to resolve; "unspecified" = backfilled)
   resolvedAt: datetime | null   // set on "resolved"; auto-close counts from here
   closedAt:   datetime | null
   autoClosed: boolean  | null   // true = closed by the 7-day sweep
@@ -58,6 +61,7 @@ submissions/{ref}
 - [x] Single submission view — update status, add internal notes
 - [x] Stats panel — total, open, new, work in progress, pending, resolved counts (tiles double as view switches)
 - [x] Status workflow — `new` → `in-progress` → `pending` → `resolved` → `closed`; `open` view = not resolved/closed; `closed` only via the 7-day auto-close sweep
+- [x] Closure codes — resolving requires a reason (fixed / implemented / answered / wont-fix / duplicate / cannot-reproduce / spam); own filterable column
 - [ ] AI Analysis button (see Epic 4)
 - [x] Move hosting to Cloudflare Pages — done, auto-deploys from main
 

@@ -3,7 +3,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   AUTO_CLOSE_DAYS,
+  CLOSURE_CODE_HINTS,
+  CLOSURE_CODE_LABELS,
+  ClosureCode,
   OPEN_STATUSES,
+  SELECTABLE_CLOSURE_CODES,
   SETTABLE_STATUSES,
   STATUSES,
   STATUS_COLORS,
@@ -11,11 +15,14 @@ import {
   STATUS_ORDER,
   Status,
   autoCloseDueAt,
+  closureCodeLabel,
   daysUntilAutoClose,
+  isClosureCode,
   isOpenStatus,
   normaliseStatus,
   statusColor,
   statusLabel,
+  takesClosureCode,
 } from '@/lib/status'
 
 const API = process.env.NEXT_PUBLIC_FEEDBACK_API_URL!
@@ -31,6 +38,8 @@ interface Submission {
   message: string
   timestamp: string
   notes: string
+  /** Why the ticket ended — required to resolve, carried through to closed. */
+  closureCode: ClosureCode | null
   /** Set when status → `resolved`; the auto-close clock counts from here. */
   resolvedAt: string | null
   closedAt: string | null
@@ -58,7 +67,8 @@ function inView(view: View, status: string): boolean {
 
 // ─── column definitions for the fault table ──────────────────────────
 // key = field on Submission, label = header, flex = grid track sizing.
-type ColKey = 'ref' | 'status' | 'type' | 'appId' | 'name' | 'message' | 'timestamp'
+type ColKey =
+  'ref' | 'status' | 'type' | 'appId' | 'name' | 'message' | 'timestamp' | 'closureCode'
 
 interface Column {
   key: ColKey
@@ -69,17 +79,23 @@ interface Column {
 const COLUMNS: Column[] = [
   { key: 'ref', label: 'REF', track: 'minmax(96px, 0.9fr)' },
   // Wide enough for "work in progress" plus a resolved row's ·Nd countdown.
-  { key: 'status', label: 'STATUS', track: '168px' },
+  { key: 'status', label: 'STATUS', track: '140px' },
   { key: 'type', label: 'TYPE', track: '92px' },
   { key: 'appId', label: 'APP', track: 'minmax(110px, 1fr)' },
   { key: 'name', label: 'FROM', track: 'minmax(110px, 1fr)' },
   { key: 'message', label: 'SUBJECT', track: 'minmax(180px, 2.4fr)' },
   { key: 'timestamp', label: 'LOGGED', track: '104px' },
+  // Blank until a ticket is resolved — which is itself information, and makes
+  // "why did things close?" a one-click sort.
+  { key: 'closureCode', label: 'CLOSURE', track: '138px' },
 ]
 
 // Leading 36px track = row-selection checkbox; trailing 34px = expand chevron.
 const GRID_TEMPLATE = '36px ' + COLUMNS.map(c => c.track).join(' ') + ' 34px'
-const GRID_MIN_WIDTH = 1034
+// The sum of every track's minimum — i.e. the narrowest the grid can be
+// without squashing. Keeping it exact means the whole table (CLOSURE column
+// included) fits a laptop window, and SUBJECT absorbs any slack above it.
+const GRID_MIN_WIDTH = 1040
 
 // ─── wildcard filtering ──────────────────────────────────────────────
 // Empty filter matches everything. A filter containing `*` is treated as a
@@ -109,7 +125,10 @@ function matchesFilter(value: string, filter: string): boolean {
  * used as the STATUS cell's tooltip and spelled out in the detail panel.
  */
 function autoCloseNote(
-  sub: { status: Status; resolvedAt: string | null; closedAt: string | null; autoClosed: boolean | null },
+  sub: {
+    status: Status; closureCode: ClosureCode | null
+    resolvedAt: string | null; closedAt: string | null; autoClosed: boolean | null
+  },
   now: number,
 ): string {
   if (sub.status === 'resolved') {
@@ -122,7 +141,9 @@ function autoCloseNote(
   }
   if (sub.status === 'closed') {
     const how = sub.autoClosed ? 'auto-closed' : 'closed'
-    return sub.closedAt ? `${how} on ${new Date(sub.closedAt).toLocaleDateString('en-GB')}` : how
+    const when = sub.closedAt ? ` on ${new Date(sub.closedAt).toLocaleDateString('en-GB')}` : ''
+    const why = sub.closureCode ? ` as ${closureCodeLabel(sub.closureCode)}` : ''
+    return `${how}${when}${why}`
   }
   return ''
 }
@@ -130,6 +151,7 @@ function autoCloseNote(
 type Filters = Record<ColKey, string>
 const EMPTY_FILTERS: Filters = {
   ref: '', status: '', type: '', appId: '', name: '', message: '', timestamp: '',
+  closureCode: '',
 }
 
 export default function Admin() {
@@ -151,6 +173,9 @@ export default function Admin() {
   // Refs the user has ticked for bulk actions.
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkSaving, setBulkSaving] = useState(false)
+  // Refs mid-resolve: the status select is showing `resolved` but nothing is
+  // saved until a closure code is chosen. `''` = armed, no code picked yet.
+  const [pendingResolve, setPendingResolve] = useState<Record<string, ClosureCode | ''>>({})
 
   const fetchSubmissions = useCallback(async (pw: string) => {
     setLoading(true)
@@ -169,8 +194,12 @@ export default function Admin() {
       const data = (await res.json()) as Submission[]
       // Statuses written by the old four-value system are rewritten by the
       // Worker's sweep, but normalise on read too so nothing can render an
-      // unknown status.
-      setSubmissions(data.map(s => ({ ...s, status: normaliseStatus(s.status) })))
+      // unknown status or closure code.
+      setSubmissions(data.map(s => ({
+        ...s,
+        status: normaliseStatus(s.status),
+        closureCode: isClosureCode(s.closureCode) ? s.closureCode : null,
+      })))
       setNow(Date.now())
       const notes: Record<string, string> = {}
       data.forEach(s => { notes[s.ref] = s.notes ?? '' })
@@ -196,47 +225,95 @@ export default function Admin() {
 
   // The status fields a local row takes on after a successful PATCH — the
   // same shape the Worker writes, so the row doesn't need a refetch to show
-  // its auto-close countdown.
-  function statusPatch(status: Status, resolvedAt: string | null) {
+  // its auto-close countdown. Reopening drops the closure code, exactly as
+  // the Worker does.
+  function statusPatch(status: Status, closureCode: ClosureCode | null, resolvedAt: string | null) {
     return {
       status,
+      closureCode: status === 'resolved' ? closureCode : null,
       resolvedAt: status === 'resolved' ? (resolvedAt ?? new Date().toISOString()) : null,
       closedAt: null,
       autoClosed: null,
     }
   }
 
-  async function updateStatus(ref: string, status: Status) {
+  function clearPendingResolve(ref: string) {
+    setPendingResolve(p => {
+      const next = { ...p }
+      delete next[ref]
+      return next
+    })
+  }
+
+  /** Resolving sends its closure code in the same request — the Worker insists. */
+  async function updateStatus(ref: string, status: Status, closureCode?: ClosureCode): Promise<boolean> {
     const pw = sessionStorage.getItem('admin-pw')!
     const res = await fetch(`${API}/admin/submissions/${ref}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(status === 'resolved' ? { status, closureCode } : { status }),
     })
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: string }
       setError(body.error ?? `Could not set ${ref} to ${statusLabel(status)}.`)
-      return
+      return false
     }
     const body = (await res.json().catch(() => ({}))) as { resolvedAt?: string | null }
     setError('')
     setNow(Date.now())
     setSubmissions(s => s.map(sub =>
-      sub.ref === ref ? { ...sub, ...statusPatch(status, body.resolvedAt ?? null) } : sub,
+      sub.ref === ref
+        ? { ...sub, ...statusPatch(status, closureCode ?? null, body.resolvedAt ?? null) }
+        : sub,
     ))
+    return true
   }
 
-  async function bulkUpdateStatus(status: Status) {
+  /** Commits an armed resolve once a closure code has been chosen. */
+  async function confirmResolve(ref: string) {
+    const code = pendingResolve[ref]
+    if (!code) return
+    setSaving(ref)
+    const ok = await updateStatus(ref, 'resolved', code)
+    setSaving(null)
+    // On failure the picker stays armed so it can be retried.
+    if (ok) clearPendingResolve(ref)
+  }
+
+  /**
+   * Corrects the closure code of an already-finished ticket on its own — no
+   * status change, so the auto-close clock isn't restarted.
+   */
+  async function updateClosureCode(ref: string, closureCode: ClosureCode) {
+    setSaving(ref)
+    const pw = sessionStorage.getItem('admin-pw')!
+    const res = await fetch(`${API}/admin/submissions/${ref}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
+      body: JSON.stringify({ closureCode }),
+    })
+    setSaving(null)
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      setError(body.error ?? `Could not set the closure code on ${ref}.`)
+      return
+    }
+    setError('')
+    setSubmissions(s => s.map(sub => (sub.ref === ref ? { ...sub, closureCode } : sub)))
+  }
+
+  async function bulkUpdateStatus(status: Status, closureCode?: ClosureCode) {
     const refs = [...selected]
     if (refs.length === 0) return
     setBulkSaving(true)
     const pw = sessionStorage.getItem('admin-pw')!
+    const payload = status === 'resolved' ? { status, closureCode } : { status }
     try {
       const results = await Promise.all(refs.map(async ref => {
         const res = await fetch(`${API}/admin/submissions/${ref}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
-          body: JSON.stringify({ status }),
+          body: JSON.stringify(payload),
         })
         return { ref, ok: res.ok }
       }))
@@ -245,7 +322,9 @@ export default function Admin() {
       const stamp = new Date().toISOString()
       setNow(Date.now())
       setSubmissions(s => s.map(sub =>
-        updated.has(sub.ref) ? { ...sub, ...statusPatch(status, stamp) } : sub,
+        updated.has(sub.ref)
+          ? { ...sub, ...statusPatch(status, closureCode ?? null, stamp) }
+          : sub,
       ))
       setError(failed.length ? `Could not update: ${failed.join(', ')}.` : '')
       setSelected(new Set(failed))
@@ -287,9 +366,11 @@ export default function Admin() {
       COLUMNS.every(c => {
         const raw = c.key === 'timestamp'
           ? new Date(s.timestamp).toLocaleDateString('en-GB')
-          // Match the STATUS column on what the table shows (the label), so
-          // "*progress*" finds work-in-progress tickets.
+          // Match STATUS/CLOSURE on what the table shows (the label), so
+          // "*progress*" finds work-in-progress tickets and "won't" finds
+          // wont-fix ones.
           : c.key === 'status' ? statusLabel(s.status)
+          : c.key === 'closureCode' ? closureCodeLabel(s.closureCode)
           : String(s[c.key] ?? '')
         return matchesFilter(raw, filters[c.key])
       }),
@@ -301,6 +382,11 @@ export default function Admin() {
       }
       if (sortKey === 'status') {
         return ((STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99)) * dir
+      }
+      if (sortKey === 'closureCode') {
+        // Unresolved rows (no code) sort together at the bottom.
+        const key = (s: Submission) => closureCodeLabel(s.closureCode) || '~'
+        return key(a).localeCompare(key(b)) * dir
       }
       return String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? '')) * dir
     })
@@ -464,6 +550,8 @@ export default function Admin() {
           you&apos;re waiting on someone). <strong>open</strong> = anything not resolved or closed.
           you can&apos;t close a ticket by hand — mark it <strong>resolved</strong> and it closes
           itself after {AUTO_CLOSE_DAYS} days, leaving time to test the fix.
+          resolving always asks <strong>why</strong> — the closure code (fixed, won&apos;t fix,
+          duplicate…) sticks with the ticket and is filterable like any column.
         </p>
       </div>
 
@@ -479,7 +567,7 @@ export default function Admin() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="retro-font" style={{ fontSize: 17, color: 'var(--color-muted)' }}>set status →</span>
             {/* No `closed` button — closing is the auto-close sweep's job. */}
-            {SETTABLE_STATUSES.map(s => (
+            {SETTABLE_STATUSES.filter(s => s !== 'resolved').map(s => (
               <button
                 key={s}
                 onClick={() => bulkUpdateStatus(s)}
@@ -494,6 +582,29 @@ export default function Admin() {
                 {STATUS_LABELS[s]}
               </button>
             ))}
+            {/* Resolving needs a reason, so it's a code picker rather than a
+                button — picking one resolves the whole selection with it. */}
+            <select
+              className="retro-font"
+              value=""
+              disabled={bulkSaving}
+              onChange={e => {
+                const code = e.target.value as ClosureCode
+                e.target.value = ''
+                if (code) bulkUpdateStatus('resolved', code)
+              }}
+              style={{
+                padding: '6px 10px', border: `3px solid ${STATUS_COLORS.resolved}`, fontSize: 17,
+                background: 'var(--color-bg)', color: STATUS_COLORS.resolved,
+                fontFamily: 'var(--font-retro), monospace',
+                cursor: bulkSaving ? 'default' : 'pointer', opacity: bulkSaving ? 0.5 : 1,
+              }}
+            >
+              <option value="">resolve as…</option>
+              {SELECTABLE_CLOSURE_CODES.map(c => (
+                <option key={c} value={c} title={CLOSURE_CODE_HINTS[c]}>{CLOSURE_CODE_LABELS[c]}</option>
+              ))}
+            </select>
           </div>
           {bulkSaving && <span className="retro-font" style={{ fontSize: 17 }}>saving…</span>}
           <button
@@ -593,6 +704,8 @@ export default function Admin() {
           )}
           {filtered.map((sub, i) => {
             const isOpen = expanded === sub.ref
+            // `undefined` = not mid-resolve; '' = resolving, no code chosen yet.
+            const pendingCode = pendingResolve[sub.ref]
             return (
               <div
                 key={sub.ref}
@@ -655,6 +768,16 @@ export default function Admin() {
                   <span className="retro-font" style={{ padding: '11px 12px', fontSize: 15, color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>
                     {new Date(sub.timestamp).toLocaleDateString('en-GB')}
                   </span>
+                  <span
+                    className="retro-font"
+                    title={sub.closureCode ? CLOSURE_CODE_HINTS[sub.closureCode] : 'not resolved yet'}
+                    style={{
+                      padding: '11px 12px', fontSize: 15, color: 'var(--color-muted)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {closureCodeLabel(sub.closureCode) || '—'}
+                  </span>
                   <span style={{ padding: '11px 8px', color: 'var(--color-muted)', textAlign: 'center' }}>
                     {isOpen ? '▲' : '▼'}
                   </span>
@@ -696,8 +819,19 @@ export default function Admin() {
                         <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>STATUS</div>
                         <select
                           className="form-select"
-                          value={sub.status}
-                          onChange={e => updateStatus(sub.ref, e.target.value as Status)}
+                          value={pendingCode !== undefined ? 'resolved' : sub.status}
+                          onChange={e => {
+                            const next = e.target.value as Status
+                            // Resolving doesn't save yet: it arms the closure
+                            // code picker beside this select, and the two go
+                            // to the Worker together.
+                            if (next === 'resolved') {
+                              setPendingResolve(p => ({ ...p, [sub.ref]: sub.closureCode ?? '' }))
+                              return
+                            }
+                            clearPendingResolve(sub.ref)
+                            updateStatus(sub.ref, next)
+                          }}
                           style={{ width: 'auto' }}
                         >
                           {/* `closed` only ever appears as the (unselectable)
@@ -710,7 +844,7 @@ export default function Admin() {
                             <option key={s} value={s}>{STATUS_LABELS[s]}</option>
                           ))}
                         </select>
-                        {autoCloseNote(sub, now) && (
+                        {autoCloseNote(sub, now) && pendingCode === undefined && (
                           <div
                             className="retro-font"
                             style={{ fontSize: 15, color: 'var(--color-muted)', marginTop: 8, maxWidth: 280 }}
@@ -718,7 +852,7 @@ export default function Admin() {
                             {autoCloseNote(sub, now)}
                           </div>
                         )}
-                        {sub.status !== 'resolved' && sub.status !== 'closed' && (
+                        {!takesClosureCode(sub.status) && pendingCode === undefined && (
                           <div
                             className="retro-font"
                             style={{ fontSize: 15, color: 'var(--color-muted)', marginTop: 8, maxWidth: 280 }}
@@ -726,6 +860,76 @@ export default function Admin() {
                             resolve it to start the {AUTO_CLOSE_DAYS}-day close countdown
                           </div>
                         )}
+                      </div>
+
+                      {/* Closure code — armed by choosing "resolved" above, and
+                          editable on its own afterwards so a wrong code can be
+                          corrected without restarting the close countdown. */}
+                      <div>
+                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>
+                          CLOSURE CODE
+                        </div>
+                        {pendingCode !== undefined ? (
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', flexWrap: 'wrap' }}>
+                            <select
+                              className="form-select"
+                              value={pendingCode}
+                              autoFocus
+                              onChange={e => setPendingResolve(p => ({ ...p, [sub.ref]: e.target.value as ClosureCode }))}
+                              style={{ width: 'auto' }}
+                            >
+                              <option value="">— why? —</option>
+                              {SELECTABLE_CLOSURE_CODES.map(c => (
+                                <option key={c} value={c}>{CLOSURE_CODE_LABELS[c]}</option>
+                              ))}
+                            </select>
+                            <button
+                              className="form-submit"
+                              disabled={!pendingCode || saving === sub.ref}
+                              onClick={() => confirmResolve(sub.ref)}
+                              style={{ padding: '10px 18px', opacity: pendingCode ? 1 : 0.4 }}
+                            >
+                              {saving === sub.ref ? '...' : 'RESOLVE →'}
+                            </button>
+                            <button
+                              className="retro-font"
+                              onClick={() => clearPendingResolve(sub.ref)}
+                              style={{
+                                padding: '10px 14px', border: '3px solid var(--color-dark)',
+                                background: 'var(--color-bg)', fontSize: 17, cursor: 'pointer',
+                              }}
+                            >
+                              cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <select
+                            className="form-select"
+                            value={sub.closureCode ?? ''}
+                            disabled={!takesClosureCode(sub.status) || saving === sub.ref}
+                            onChange={e => updateClosureCode(sub.ref, e.target.value as ClosureCode)}
+                            style={{ width: 'auto', opacity: takesClosureCode(sub.status) ? 1 : 0.5 }}
+                          >
+                            <option value="" disabled>—</option>
+                            {SELECTABLE_CLOSURE_CODES.map(c => (
+                              <option key={c} value={c}>{CLOSURE_CODE_LABELS[c]}</option>
+                            ))}
+                            {/* Backfilled on tickets resolved before codes existed. */}
+                            {sub.closureCode === 'unspecified' && (
+                              <option value="unspecified">{CLOSURE_CODE_LABELS.unspecified}</option>
+                            )}
+                          </select>
+                        )}
+                        <div
+                          className="retro-font"
+                          style={{ fontSize: 15, color: 'var(--color-muted)', marginTop: 8, maxWidth: 280 }}
+                        >
+                          {pendingCode !== undefined
+                            ? (pendingCode ? CLOSURE_CODE_HINTS[pendingCode] : 'pick why this is done — it stays on the ticket')
+                            : sub.closureCode
+                              ? CLOSURE_CODE_HINTS[sub.closureCode]
+                              : 'set when you resolve the ticket'}
+                        </div>
                       </div>
                       <div style={{ flex: 1, minWidth: 200 }}>
                         <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>INTERNAL NOTES</div>

@@ -280,3 +280,71 @@ render as an unknown status. `wont-fix` is gone as a state: a won't-do item is
 ### Deploy note
 The Worker needs a redeploy for any of this to take effect (`cd worker &&
 npx wrangler deploy`) — that's also what registers the nightly cron trigger.
+
+---
+
+## 2026-07-25 (session 2) — Closure codes: *why* a ticket ended
+
+The lifecycle said where a ticket was; nothing said why it stopped. Added a
+closure code, which is also where the retired `wont-fix` status belongs — it was
+never a state, it was a reason.
+
+### The codes
+Added to `lib/status.ts` next to the statuses (same one-file-two-consumers rule):
+
+| Code | Use it when |
+|---|---|
+| `fixed` | it was broken, now it works |
+| `implemented` | the requested thing was built or added |
+| `answered` | a question or comment answered — nothing to change |
+| `wont-fix` | real, understood, deliberately not doing it |
+| `duplicate` | already covered by another ticket |
+| `cannot-reproduce` | couldn't make it happen; nothing to fix |
+| `spam` | not a genuine submission |
+| `unspecified` | **not selectable** — backfill for tickets resolved before this existed |
+
+Each carries a one-line hint (`CLOSURE_CODE_HINTS`) that the dashboard shows
+under the picker, so the codes stay used consistently months from now.
+
+### Required on resolve, and that shapes the UI
+The Worker rejects `status: resolved` without a `closureCode` in the same
+request — otherwise the field would drift to "usually blank" and answer nothing.
+So resolving in the dashboard is deliberately two steps:
+
+- Picking "resolved" in the status select **doesn't save**. It arms a closure
+  code picker beside it with a `RESOLVE →` confirm (disabled until a code is
+  chosen) and a cancel. One PATCH carries both fields.
+- The bulk bar's `resolved` button became a **"resolve as…"** picker for the
+  same reason; new / work in progress / pending stay plain buttons.
+- Afterwards the code is editable on its own — a `closureCode`-only PATCH that
+  doesn't touch the status, so **correcting a code doesn't restart the 7-day
+  clock**. Reopening a ticket clears the code, since it no longer applies.
+
+### Dashboard
+- New **CLOSURE** column: `—` while a ticket is open, the code once it's done;
+  wildcard-filterable and sortable like the rest (unresolved rows sort last).
+  Cell tooltip is the code's hint.
+- The STATUS track came down from 168px to 140px so `GRID_MIN_WIDTH` could stay
+  at the grid's true minimum (1040) — the whole table, closure column included,
+  still fits a laptop window instead of needing a horizontal scroll.
+- A closed row's note now reads "auto-closed on 18/07/2026 **as fixed**".
+
+### Sweep / legacy data
+- `wont-fix` records migrate to `closed` **keeping their meaning** as
+  `closureCode: wont-fix` — information the last change had dropped.
+- Legacy `done` → `resolved` gets `unspecified`; so does any resolved ticket
+  found without a code (clock-start and auto-close both backfill).
+- Caught a bug here in review: the first cut stamped `unspecified` on *every*
+  legacy migration, including `open` → `new`, giving unfinished tickets a
+  closure code. Now gated on `takesClosureCode(status)`, with two tests pinning
+  it (`open → new stays codeless`, `unknown → new stays codeless`).
+
+### Verified
+- `next build` + worker `tsc` clean; sweep fixtures extended to 25 assertions
+  (code carried through auto-close, backfills, codeless migrations, idempotent
+  re-run, label/validation helpers) — all pass.
+- Driven in a browser against a mock Worker that enforces the real 400: choosing
+  "resolved" sends **zero** requests, the confirm stays disabled with no code,
+  and confirming sends exactly one PATCH with
+  `{status: resolved, closureCode: cannot-reproduce}`. Bulk "resolve as → spam"
+  sends the same shape. Closure select is disabled on tickets that aren't done.

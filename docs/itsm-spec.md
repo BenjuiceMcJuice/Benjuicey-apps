@@ -186,7 +186,8 @@ migration is forced; a lazy backfill during triage is enough.
 | `slaDueAt` | timestamp | `null` | computed from `priority` + `timestamp` |
 | `assignee` | string | `"ben"` | single implementer today; kept for future |
 | `resolvedAt` | timestamp | `null` | ✅ **built** — set when status → `resolved` |
-| `resolution` | string | `""` | short "what fixed it" note (feeds Change record / KB) |
+| `closureCode` | string | `null` | ✅ **built** — *why* it ended; required to resolve (§6.3) |
+| `resolution` | string | `""` | free-text "what fixed it" note, distinct from the coded `closureCode` (feeds Change record / KB) |
 
 ### 6.3 Status: ✅ built
 
@@ -206,9 +207,14 @@ new → in-progress → resolved → closed
 - **`closed` is not settable.** `PATCH /admin/submissions/:ref` rejects it; a
   ticket is marked `resolved` (which stamps `resolvedAt`) and auto-closes 7 days
   later, leaving a window to test the fix. Reopening clears the clock.
+- **Resolving carries a closure code** (`fixed` / `implemented` / `answered` /
+  `wont-fix` / `duplicate` / `cannot-reproduce` / `spam`), required by the
+  Worker in the same request. This is the ITIL *resolution code*, and it's where
+  the old `wont-fix` status belongs — a reason, not a state.
 - The old four values were migrated in place by the same sweep that auto-closes
-  (`worker/src/sweep.ts`): `open` → `new`, `done` → `resolved`, `wont-fix` →
-  `closed`. Nothing stores them any more.
+  (`worker/src/sweep.ts`): `open` → `new`, `done` → `resolved` (code
+  `unspecified`), `wont-fix` → `closed` (code `wont-fix`). Nothing stores them
+  any more.
 
 Full write-up: [`feedback-how-it-works.md`](feedback-how-it-works.md) →
 "The ticket lifecycle".
@@ -265,8 +271,8 @@ states valid for the row's `recordType`.
 > `resolved` → `closed` — is built (§6.3) and applies to every ticket regardless
 > of type. The type-specific extras above (`triaged`, `approved`, `answered`,
 > `investigating`, `known-error`) are still proposed, and arrive with
-> `recordType`. `wont-fix` is gone: a won't-do item is `resolved` with a note
-> explaining why, and closes itself like anything else.
+> `recordType`. `wont-fix` is gone as a *state*: a won't-do item is `resolved`
+> with `closureCode: wont-fix`, and closes itself like anything else.
 
 ---
 
@@ -379,7 +385,7 @@ dashboard always shows *who* triaged (`claude` vs `ben`) so nothing is a black b
 | Phase | Deliverable | Depends on |
 |---|---|---|
 | **0** | ✅ Technical fault table in `/admin` (columns, wildcard filters, default = open). | done |
-| **0.5** | ✅ Status lifecycle (`new`/`in-progress`/`pending`/`resolved`/`closed`), `open` as a view, 7-day auto-close + legacy migration sweep, widened `updateSubmission`. | done |
+| **0.5** | ✅ Status lifecycle (`new`/`in-progress`/`pending`/`resolved`/`closed`), `open` as a view, 7-day auto-close + legacy migration sweep, closure codes on resolve, widened `updateSubmission`. | done |
 | **1** | Add `recordType` + `sourceType` to the schema; per-type state sets; queue presets + triage panel in the UI. | phase 0.5 |
 | **2** | Impact/urgency → priority + `slaDueAt` (server-computed); *Overdue* queue. | phase 1 |
 | **3** | `problem` records + linking; duplicate linking. | phase 1 |

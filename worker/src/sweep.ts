@@ -1,5 +1,7 @@
 import { commitSubmissionUpdates, SubmissionUpdate } from './firestore'
-import { isAutoCloseDue, isStatus, normaliseStatus } from '../../lib/status'
+import {
+  isAutoCloseDue, isClosureCode, isStatus, normaliseStatus, takesClosureCode,
+} from '../../lib/status'
 
 // ─── status sweep ────────────────────────────────────────────────────
 // Two housekeeping jobs, both driven off a list of submissions we already
@@ -36,6 +38,7 @@ export function planStatusSweep(
 
     const raw = sub.status
     const resolvedAt = (sub.resolvedAt ?? null) as string | null
+    const hasCode = isClosureCode(sub.closureCode)
 
     // 1. Legacy status → current enum.
     if (!isStatus(raw)) {
@@ -48,26 +51,35 @@ export function planStatusSweep(
         fields.closedAt = new Date(now)
         fields.autoClosed = false
       }
+      // Only a finished ticket carries a closure code — a legacy `open`
+      // becomes `new` and stays codeless. A legacy `wont-fix` is the one old
+      // status that said *why* it ended, so keep that meaning rather than
+      // flattening it to `unspecified`.
+      if (takesClosureCode(status) && !hasCode) {
+        fields.closureCode = raw === 'wont-fix' ? 'wont-fix' : 'unspecified'
+      }
       plan.push({ ref, fields, reason: 'legacy-migration' })
       continue
     }
 
     if (raw !== 'resolved') continue
 
-    // 2a. Resolved but with no timestamp (e.g. written before this field
-    //     existed): start the clock rather than close it out of nowhere.
+    // 2a. Resolved but with no timestamp (e.g. written before these fields
+    //     existed): start the clock rather than close it out of nowhere, and
+    //     backfill a closure code so nothing sits there with no explanation.
     if (!resolvedAt) {
-      plan.push({ ref, fields: { resolvedAt: new Date(now) }, reason: 'resolved-clock-start' })
+      const fields: SubmissionUpdate = { resolvedAt: new Date(now) }
+      if (!hasCode) fields.closureCode = 'unspecified'
+      plan.push({ ref, fields, reason: 'resolved-clock-start' })
       continue
     }
 
-    // 2b. Resolved long enough — close it.
+    // 2b. Resolved long enough — close it. The closure code carries over
+    //     from the resolve untouched (only backfilled if somehow missing).
     if (isAutoCloseDue(resolvedAt, now)) {
-      plan.push({
-        ref,
-        fields: { status: 'closed', closedAt: new Date(now), autoClosed: true },
-        reason: 'auto-close',
-      })
+      const fields: SubmissionUpdate = { status: 'closed', closedAt: new Date(now), autoClosed: true }
+      if (!hasCode) fields.closureCode = 'unspecified'
+      plan.push({ ref, fields, reason: 'auto-close' })
     }
   }
 

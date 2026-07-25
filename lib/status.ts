@@ -93,6 +93,72 @@ export function statusColor(value: unknown): string {
   return STATUS_COLORS[normaliseStatus(value)]
 }
 
+// ─── closure codes ───────────────────────────────────────────────────
+// *Why* a ticket ended, stored on `closureCode`. Set when a ticket is
+// resolved — the Worker requires one in the same request, so "resolved" is
+// never a dead end with no explanation. It then carries through to `closed`.
+//
+// Deliberately kept to a handful: enough to answer "what actually happens to
+// feedback?" without turning triage into form-filling.
+
+export const CLOSURE_CODES = [
+  'fixed',
+  'implemented',
+  'answered',
+  'wont-fix',
+  'duplicate',
+  'cannot-reproduce',
+  'spam',
+  'unspecified',
+] as const
+
+export type ClosureCode = (typeof CLOSURE_CODES)[number]
+
+export const CLOSURE_CODE_LABELS: Record<ClosureCode, string> = {
+  fixed: 'fixed',
+  implemented: 'implemented',
+  answered: 'answered',
+  'wont-fix': "won't fix",
+  duplicate: 'duplicate',
+  'cannot-reproduce': "can't reproduce",
+  spam: 'spam / invalid',
+  unspecified: 'unspecified',
+}
+
+/** What each code means — shown as tooltips on the picker. */
+export const CLOSURE_CODE_HINTS: Record<ClosureCode, string> = {
+  fixed: 'it was broken, now it works',
+  implemented: 'the requested thing was built or added',
+  answered: 'a question or comment answered — nothing to change',
+  'wont-fix': 'real, understood, deliberately not doing it',
+  duplicate: 'already covered by another ticket',
+  'cannot-reproduce': "couldn't make it happen; nothing to fix",
+  spam: 'not a genuine submission',
+  unspecified: 'closed before closure codes existed',
+}
+
+/**
+ * Codes a human may choose. `unspecified` is absent: it exists only to
+ * backfill tickets resolved before this field did.
+ */
+export const SELECTABLE_CLOSURE_CODES: ClosureCode[] =
+  CLOSURE_CODES.filter(c => c !== 'unspecified')
+
+export function isClosureCode(value: unknown): value is ClosureCode {
+  return typeof value === 'string' && (CLOSURE_CODES as readonly string[]).includes(value)
+}
+
+/** Label for display; empty string when a ticket has no code (i.e. isn't done). */
+export function closureCodeLabel(value: unknown): string {
+  return isClosureCode(value) ? CLOSURE_CODE_LABELS[value] : ''
+}
+
+/** Statuses that carry a closure code. */
+export function takesClosureCode(status: unknown): boolean {
+  const s = normaliseStatus(status)
+  return s === 'resolved' || s === 'closed'
+}
+
 // ─── auto-close policy ───────────────────────────────────────────────
 // A resolved ticket stays resolved for a week so a fix can be tested (and
 // the submitter can come back) before the ticket closes for good.
