@@ -181,3 +181,102 @@ Desk that triages every item into the right ITIL process:
 - Rollout is phased and each phase is independently shippable; open decisions for
   Ben are listed at the end. Explicitly out of scope: CMDB, asset mgmt, CAB —
   ITIL as vocabulary, not a framework to implement wholesale.
+
+---
+
+## 2026-07-25 — Status workflow redesign: real lifecycle + 7-day auto-close
+
+The four statuses (`open` / `in-progress` / `done` / `wont-fix`) were a feedback
+inbox's states, not a service desk's. Replaced them with a proper lifecycle,
+made "open" a *view* over that lifecycle, and took closing out of human hands.
+
+### The model — one file, two consumers
+`lib/status.ts` is now the single source of truth, imported by **both** the
+Worker (`worker/src/*`) and the admin dashboard (`app/admin/page.tsx`) so the
+backend and UI can't drift. It holds the enum, labels, colours, sort order, the
+settable/open subsets, the legacy map and the auto-close maths.
+
+```
+new → in-progress → resolved → closed
+        ↕
+      pending
+```
+
+- `new` — just landed (every submission starts here; `POST /submit` stamps it)
+- `in-progress` — shown as **work in progress**
+- `pending` — parked, waiting on someone/something else
+- `resolved` — believed fixed, still reopenable
+- `closed` — settled, **and only ever set automatically**
+
+**`open` is a bucket, not a status:** anything not `resolved`/`closed`, i.e.
+`new` + `in-progress` + `pending`. Nothing is stored as `open` any more. The
+dashboard's view state was split from the per-column STATUS filter, so the two
+compose instead of fighting (the preset buttons used to *be* the status filter).
+
+### Auto-close after 7 days
+You can't close a ticket by hand — the dropdown doesn't offer it and the Worker
+400s on `{"status":"closed"}` with an explanation. You mark it `resolved`,
+which stamps `resolvedAt`, and it closes itself a week later. That week is the
+point: time to test the fix, and for a submitter to come back if it didn't hold.
+Moving a ticket back to `new`/`in-progress`/`pending` clears `resolvedAt`, so a
+reopened ticket never closes on a stale timer.
+
+`worker/src/sweep.ts` is a pure planner (`planStatusSweep`) plus a committer, run
+from two places sharing one implementation so nothing closes twice:
+- `GET /admin/submissions` sweeps the list it just fetched, before returning it —
+  **zero extra reads** (it works off the docs already in memory) and zero writes
+  unless something is due. The dashboard can therefore never show a ticket that
+  should already have closed.
+- A nightly Cloudflare cron (`[triggers] crons = ["30 3 * * *"]` + a `scheduled`
+  handler) does the same, so closing doesn't depend on anyone logging in.
+
+### Legacy data migrated in place, no migration script
+The same sweep rewrites pre-redesign records the first time it sees them:
+`open` → `new`, `done` → `resolved`, `wont-fix` → `closed`. A legacy `done` gets
+its 7-day clock *started* then rather than closing instantly. Statuses are also
+normalised on read in both the Worker and the UI, so an unswept record can never
+render as an unknown status. `wont-fix` is gone as a state: a won't-do item is
+`resolved` with a note saying why, and closes like anything else.
+
+### Dashboard
+- Six stat tiles (total / open / new / work in progress / pending / resolved),
+  each now a **shortcut to that view**; `.admin-stats` moved to `auto-fit` so
+  they sit on one row when there's room and stay 2-up on portrait phones.
+- Views row: all · open (default) · one per status.
+- A `resolved` row shows its countdown inline (`·4d`) and spelled out in the
+  detail panel ("auto-closes in 4 days (29/07/2026) — reopen before then if the
+  fix didn't hold"). A `closed` row says when, and whether it was automatic.
+- The status dropdown offers only the four settable states; an auto-closed ticket
+  shows `closed` as a disabled current value, and picking anything else reopens
+  it. Bulk status bar likewise lost its `closed` button.
+- The STATUS column filter matches the *label*, so `*progress*` finds work-in-
+  progress tickets. Column widened to fit the longer label + countdown.
+- Bulk updates now track per-ref failures instead of assuming success: failed
+  refs stay selected and are named in the error line.
+
+### Plumbing
+- `updateSubmission` takes a typed field bag (`status`, `notes`, `resolvedAt`,
+  `closedAt`, `autoClosed`) through the generic value encoder instead of
+  hand-rolling `stringValue` for two fields — timestamps and nulls now work, so
+  clearing a field is expressible. Added `commitSubmissionUpdates` for batched
+  sweep writes (one Firestore commit for the whole batch, each with its own
+  field mask).
+- `PATCH` returns the `resolvedAt` it stamped, so the UI shows the countdown
+  without a refetch.
+- Root `tsconfig.json` now excludes `worker/` — it has its own tsconfig and
+  `@cloudflare/workers-types`, and the new `scheduled` handler's globals don't
+  exist under the Next config.
+
+### Verified
+- `next build` clean (types + lint); `wrangler deploy --dry-run` bundles the
+  Worker including the shared `lib/status.ts` and accepts the cron trigger.
+- Sweep policy exercised against fixtures (legacy migration, overdue, exactly-7-
+  days boundary, missing `resolvedAt`, already-closed, unknown value, idempotent
+  re-run) — all pass.
+- Dashboard driven in a real browser against mocked Worker data at desktop and
+  portrait-phone widths: open view hides resolved/closed, a legacy `open` record
+  renders as `new`, countdown and disabled-`closed` behaviour confirmed.
+
+### Deploy note
+The Worker needs a redeploy for any of this to take effect (`cd worker &&
+npx wrangler deploy`) — that's also what registers the nightly cron trigger.

@@ -57,14 +57,70 @@ Each submission is one document at `submissions/{ref}`:
 | `appId` | `whatadisaster` | the app |
 | `trigram` | `WDA` | Worker (from appId) |
 | `type` | `bug` | the user (`bug`/`content`/`request`/`general`) |
-| `status` | `open` | Worker (always starts `open`) |
+| `status` | `new` | Worker (always starts `new` — see the lifecycle below) |
 | `name` | `Jane` | the user |
 | `email` | `jane@…` (may be blank) | the user |
 | `message` | free text | the user |
 | `timestamp` | date/time | Worker |
 | `notes` | `` (empty) | you, later, in the admin dashboard |
+| `resolvedAt` | date/time or null | Worker, when status → `resolved` (starts the auto-close clock) |
+| `closedAt` | date/time or null | Worker, when the ticket closes |
+| `autoClosed` | `true` / `false` / null | Worker (`true` = closed by the 7-day sweep) |
 
 There's also a tiny `counters/{trigram}` document per app that just holds the last-used number, so each app gets its own clean sequence (`WDA-0001`, `WDA-0002`, …) independent of every other app.
+
+---
+
+## The ticket lifecycle (statuses)
+
+Five statuses, in workflow order. The canonical list lives in one place —
+[`lib/status.ts`](../lib/status.ts) — which both the Worker and the admin
+dashboard import, so the backend and the UI can't drift.
+
+| Status | Meaning |
+|---|---|
+| `new` | Just landed, not looked at yet. Every submission starts here. |
+| `in-progress` | Being worked on. Shown as **work in progress**. |
+| `pending` | Parked, waiting on someone or something else (a reply, an upstream fix). |
+| `resolved` | Believed fixed/answered. Still visible, still reopenable. |
+| `closed` | Done and settled. **Set automatically, never by hand.** |
+
+```
+new ──▶ in-progress ──▶ resolved ──(7 days)──▶ closed
+          ▲     │                     │
+          └─ pending ◀────────────────┘  (reopening clears the clock)
+```
+
+**The `open` view = anything that isn't `resolved` or `closed`** — i.e. `new` +
+`in-progress` + `pending`. It's what the dashboard lands on, and it's the
+"still on my plate" list. `open` is a *bucket*, not a status; nothing is ever
+stored with a status of `open`.
+
+### Auto-close after 7 days
+
+You can't mark a ticket `closed` yourself — the dashboard doesn't offer it and
+the Worker rejects `{"status":"closed"}` with a 400. Instead you mark it
+`resolved`, which stamps `resolvedAt`, and it closes itself **7 days later**.
+That week is deliberate: it leaves time to test the fix, and for a submitter to
+come back and say it's still broken. Moving a ticket back to `new` /
+`in-progress` / `pending` before then clears `resolvedAt`, so a reopened ticket
+never closes on a stale timer.
+
+The window is one constant — `AUTO_CLOSE_DAYS` in `lib/status.ts`.
+
+Two things run the sweep (`worker/src/sweep.ts`), sharing one implementation so
+a ticket can't be closed twice:
+
+- **`GET /admin/submissions`** sweeps the list it just fetched before returning
+  it, so the dashboard never shows a ticket that should already have closed. No
+  extra reads, and no writes at all unless something is due.
+- **A nightly Cloudflare cron** (03:30 UTC, `[triggers]` in `wrangler.toml`) does
+  the same, so closing doesn't depend on anyone opening the dashboard.
+
+The same sweep rewrites records from the pre-redesign four-status system
+(`open` → `new`, `done` → `resolved`, `wont-fix` → `closed`) the first time it
+sees them, so no manual migration was needed. A legacy `done` gets its 7-day
+clock started at that moment rather than closing instantly.
 
 ---
 
@@ -95,9 +151,11 @@ Until this is done, feedback still saves fine — you just read it in the admin 
 The portfolio site has a private admin page: **`https://benjuicey-apps.pages.dev/admin`** (also on the live portfolio domain). Enter the admin password and you get:
 
 - Every submission from every app in one list, newest first
-- Stat tiles: total / open / in-progress / done
-- Filters by status and by app
-- Click any item to read the full message, change its **status** (`open` → `in-progress` → `done` / `wont-fix`), and add private **internal notes**
+- Stat tiles: total / open / new / work in progress / pending / resolved — each tile is also a shortcut to that view
+- Views: **all**, **open** (the default — everything not resolved or closed), then one per status
+- Wildcard filters and click-to-sort on every column, plus multi-select for bulk status changes
+- Click any item to read the full message, change its **status**, and add private **internal notes**
+- A `resolved` ticket shows how long until it auto-closes (`·4d` in the table, spelled out in the detail panel). `closed` isn't offered as a choice — see the lifecycle above.
 
 That's the whole management surface — it reads and writes through the Worker's admin endpoints.
 
@@ -117,6 +175,11 @@ curl -X PATCH https://benjuicey-feedback.benjuicemcjuice.workers.dev/admin/submi
   -d '{"status":"in-progress","notes":"triaged: real bug, assigned to next sprint"}'
 ```
 
+`status` accepts only `new`, `in-progress`, `pending`, `resolved`. Anything else
+— including `closed` and the retired `open` / `done` / `wont-fix` — gets a 400
+with an explanation. Setting `resolved` returns the `resolvedAt` it stamped, so
+a caller can work out the auto-close date without a second request.
+
 > **The admin password is a secret.** It lives only as the `ADMIN_PASSWORD` secret in Cloudflare. Do not commit it to any repo. Provide it to Claude at the moment you ask for a triage run; Claude does not and should not store it.
 
 ---
@@ -128,18 +191,18 @@ This is the workflow for "read the newer updates and categorise them" — either
 ### What Claude does
 
 1. **Pull** the submissions via `GET /admin/submissions` (you provide the admin password for that run).
-2. **Focus on what's new** — e.g. everything with `status: "open"`, or everything since a date/ref you name.
+2. **Focus on what's new** — e.g. everything with `status: "new"` (or the whole open bucket: `new` + `in-progress` + `pending`), or everything since a date/ref you name.
 3. **Categorise & triage**, going beyond the coarse `type` the user picked:
    - group by app and by theme (e.g. "3 apps have a dark-mode request")
    - flag likely duplicates
    - suggest a priority (volume + recency + severity)
    - surface anything urgent or from a named partner
    - give a per-app summary
-4. **Optionally write back** — set `status` (e.g. `open` → `in-progress`) and drop a triage tag into `notes` via `PATCH`, so the dashboard reflects the review.
+4. **Optionally write back** — set `status` (e.g. `new` → `in-progress`) and drop a triage tag into `notes` via `PATCH`, so the dashboard reflects the review.
 
 ### A ready-to-use prompt
 
-> "Pull all feedback from the shared Worker admin endpoint (password: `<paste>`), look at everything still `open`, and categorise it: group by theme and app, flag duplicates and anything urgent, and give me a prioritised list of what to act on. Don't write anything back yet — just show me the summary."
+> "Pull all feedback from the shared Worker admin endpoint (password: `<paste>`), look at everything still open (`new` / `in-progress` / `pending`), and categorise it: group by theme and app, flag duplicates and anything urgent, and give me a prioritised list of what to act on. Don't write anything back yet — just show me the summary."
 
 Then, if you like the triage: "Now mark items 1–4 as `in-progress` and add a one-line triage note to each."
 

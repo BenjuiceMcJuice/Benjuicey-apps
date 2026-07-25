@@ -1,6 +1,22 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import {
+  AUTO_CLOSE_DAYS,
+  OPEN_STATUSES,
+  SETTABLE_STATUSES,
+  STATUSES,
+  STATUS_COLORS,
+  STATUS_LABELS,
+  STATUS_ORDER,
+  Status,
+  autoCloseDueAt,
+  daysUntilAutoClose,
+  isOpenStatus,
+  normaliseStatus,
+  statusColor,
+  statusLabel,
+} from '@/lib/status'
 
 const API = process.env.NEXT_PUBLIC_FEEDBACK_API_URL!
 
@@ -9,26 +25,36 @@ interface Submission {
   appId: string
   trigram: string
   type: string
-  status: string
+  status: Status
   name: string
   email: string
   message: string
   timestamp: string
   notes: string
+  /** Set when status → `resolved`; the auto-close clock counts from here. */
+  resolvedAt: string | null
+  closedAt: string | null
+  autoClosed: boolean | null
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  open: '#e74c3c',
-  'in-progress': '#f39c12',
-  done: '#27ae60',
-  'wont-fix': '#95a5a6',
-}
+// ─── views ───────────────────────────────────────────────────────────
+// A view is a status *bucket*, not a plain status match: `open` means
+// "still on the pile" — anything that isn't resolved or closed. It's the
+// default landing view. The per-column STATUS filter is separate and still
+// free-text/wildcard, so both can be used together.
+type View = 'all' | 'open' | Status
 
-const STATUS_OPTIONS = ['open', 'in-progress', 'done', 'wont-fix']
-const STATUS_ORDER = STATUS_OPTIONS.reduce<Record<string, number>>(
-  (acc, s, i) => ({ ...acc, [s]: i }),
-  {},
-)
+const VIEWS: { v: View; label: string }[] = [
+  { v: 'all', label: 'all' },
+  { v: 'open', label: 'open' },
+  ...STATUSES.map(s => ({ v: s as View, label: STATUS_LABELS[s] })),
+]
+
+function inView(view: View, status: string): boolean {
+  if (view === 'all') return true
+  if (view === 'open') return isOpenStatus(status)
+  return normaliseStatus(status) === view
+}
 
 // ─── column definitions for the fault table ──────────────────────────
 // key = field on Submission, label = header, flex = grid track sizing.
@@ -42,7 +68,8 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { key: 'ref', label: 'REF', track: 'minmax(96px, 0.9fr)' },
-  { key: 'status', label: 'STATUS', track: '110px' },
+  // Wide enough for "work in progress" plus a resolved row's ·Nd countdown.
+  { key: 'status', label: 'STATUS', track: '168px' },
   { key: 'type', label: 'TYPE', track: '92px' },
   { key: 'appId', label: 'APP', track: 'minmax(110px, 1fr)' },
   { key: 'name', label: 'FROM', track: 'minmax(110px, 1fr)' },
@@ -52,7 +79,7 @@ const COLUMNS: Column[] = [
 
 // Leading 36px track = row-selection checkbox; trailing 34px = expand chevron.
 const GRID_TEMPLATE = '36px ' + COLUMNS.map(c => c.track).join(' ') + ' 34px'
-const GRID_MIN_WIDTH = 976
+const GRID_MIN_WIDTH = 1034
 
 // ─── wildcard filtering ──────────────────────────────────────────────
 // Empty filter matches everything. A filter containing `*` is treated as a
@@ -77,6 +104,29 @@ function matchesFilter(value: string, filter: string): boolean {
   return v.includes(q)
 }
 
+/**
+ * One-line explanation of where a ticket sits in the auto-close window —
+ * used as the STATUS cell's tooltip and spelled out in the detail panel.
+ */
+function autoCloseNote(
+  sub: { status: Status; resolvedAt: string | null; closedAt: string | null; autoClosed: boolean | null },
+  now: number,
+): string {
+  if (sub.status === 'resolved') {
+    const days = daysUntilAutoClose(sub.resolvedAt, now)
+    const due = autoCloseDueAt(sub.resolvedAt)
+    if (days === null || due === null) return `auto-closes ${AUTO_CLOSE_DAYS} days after being resolved`
+    if (days === 0) return 'auto-closes on the next sweep'
+    return `auto-closes in ${days} day${days === 1 ? '' : 's'} (${new Date(due).toLocaleDateString('en-GB')})`
+      + ' — reopen before then if the fix didn\'t hold'
+  }
+  if (sub.status === 'closed') {
+    const how = sub.autoClosed ? 'auto-closed' : 'closed'
+    return sub.closedAt ? `${how} on ${new Date(sub.closedAt).toLocaleDateString('en-GB')}` : how
+  }
+  return ''
+}
+
 type Filters = Record<ColKey, string>
 const EMPTY_FILTERS: Filters = {
   ref: '', status: '', type: '', appId: '', name: '', message: '', timestamp: '',
@@ -88,8 +138,11 @@ export default function Admin() {
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  // Default view: OPEN tickets only.
-  const [filters, setFilters] = useState<Filters>({ ...EMPTY_FILTERS, status: 'open' })
+  // Default view: everything not resolved/closed.
+  const [view, setView] = useState<View>('open')
+  const [filters, setFilters] = useState<Filters>({ ...EMPTY_FILTERS })
+  // Re-stamped on every load so the auto-close countdowns stay honest.
+  const [now, setNow] = useState(() => Date.now())
   const [sortKey, setSortKey] = useState<ColKey>('timestamp')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -114,7 +167,11 @@ export default function Admin() {
       }
       if (!res.ok) throw new Error('Failed to load')
       const data = (await res.json()) as Submission[]
-      setSubmissions(data)
+      // Statuses written by the old four-value system are rewritten by the
+      // Worker's sweep, but normalise on read too so nothing can render an
+      // unknown status.
+      setSubmissions(data.map(s => ({ ...s, status: normaliseStatus(s.status) })))
+      setNow(Date.now())
       const notes: Record<string, string> = {}
       data.forEach(s => { notes[s.ref] = s.notes ?? '' })
       setEditNotes(notes)
@@ -137,32 +194,61 @@ export default function Admin() {
     fetchSubmissions(password)
   }
 
-  async function updateStatus(ref: string, status: string) {
+  // The status fields a local row takes on after a successful PATCH — the
+  // same shape the Worker writes, so the row doesn't need a refetch to show
+  // its auto-close countdown.
+  function statusPatch(status: Status, resolvedAt: string | null) {
+    return {
+      status,
+      resolvedAt: status === 'resolved' ? (resolvedAt ?? new Date().toISOString()) : null,
+      closedAt: null,
+      autoClosed: null,
+    }
+  }
+
+  async function updateStatus(ref: string, status: Status) {
     const pw = sessionStorage.getItem('admin-pw')!
-    await fetch(`${API}/admin/submissions/${ref}`, {
+    const res = await fetch(`${API}/admin/submissions/${ref}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
       body: JSON.stringify({ status }),
     })
-    setSubmissions(s => s.map(sub => sub.ref === ref ? { ...sub, status } : sub))
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      setError(body.error ?? `Could not set ${ref} to ${statusLabel(status)}.`)
+      return
+    }
+    const body = (await res.json().catch(() => ({}))) as { resolvedAt?: string | null }
+    setError('')
+    setNow(Date.now())
+    setSubmissions(s => s.map(sub =>
+      sub.ref === ref ? { ...sub, ...statusPatch(status, body.resolvedAt ?? null) } : sub,
+    ))
   }
 
-  async function bulkUpdateStatus(status: string) {
+  async function bulkUpdateStatus(status: Status) {
     const refs = [...selected]
     if (refs.length === 0) return
     setBulkSaving(true)
     const pw = sessionStorage.getItem('admin-pw')!
-    const refSet = new Set(refs)
     try {
-      await Promise.all(refs.map(ref =>
-        fetch(`${API}/admin/submissions/${ref}`, {
+      const results = await Promise.all(refs.map(async ref => {
+        const res = await fetch(`${API}/admin/submissions/${ref}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
           body: JSON.stringify({ status }),
-        }),
+        })
+        return { ref, ok: res.ok }
+      }))
+      const updated = new Set(results.filter(r => r.ok).map(r => r.ref))
+      const failed = results.filter(r => !r.ok).map(r => r.ref)
+      const stamp = new Date().toISOString()
+      setNow(Date.now())
+      setSubmissions(s => s.map(sub =>
+        updated.has(sub.ref) ? { ...sub, ...statusPatch(status, stamp) } : sub,
       ))
-      setSubmissions(s => s.map(sub => (refSet.has(sub.ref) ? { ...sub, status } : sub)))
-      setSelected(new Set())
+      setError(failed.length ? `Could not update: ${failed.join(', ')}.` : '')
+      setSelected(new Set(failed))
     } finally {
       setBulkSaving(false)
     }
@@ -197,9 +283,13 @@ export default function Admin() {
 
   const filtered = useMemo(() => {
     const rows = submissions.filter(s =>
+      inView(view, s.status) &&
       COLUMNS.every(c => {
         const raw = c.key === 'timestamp'
           ? new Date(s.timestamp).toLocaleDateString('en-GB')
+          // Match the STATUS column on what the table shows (the label), so
+          // "*progress*" finds work-in-progress tickets.
+          : c.key === 'status' ? statusLabel(s.status)
           : String(s[c.key] ?? '')
         return matchesFilter(raw, filters[c.key])
       }),
@@ -214,7 +304,7 @@ export default function Admin() {
       }
       return String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? '')) * dir
     })
-  }, [submissions, filters, sortKey, sortDir])
+  }, [submissions, view, filters, sortKey, sortDir])
 
   const allVisibleSelected = filtered.length > 0 && filtered.every(s => selected.has(s.ref))
   const someVisibleSelected = filtered.some(s => selected.has(s.ref))
@@ -237,11 +327,21 @@ export default function Admin() {
     })
   }
 
-  const stats = [
-    { label: 'total', value: submissions.length, color: 'var(--color-dark)' },
-    { label: 'open', value: submissions.filter(s => s.status === 'open').length, color: '#e74c3c' },
-    { label: 'in progress', value: submissions.filter(s => s.status === 'in-progress').length, color: '#f39c12' },
-    { label: 'done', value: submissions.filter(s => s.status === 'done').length, color: '#27ae60' },
+  // Tiles double as view switches. "open" is the aggregate (new + work in
+  // progress + pending); `closed` has no tile — it lives behind its view.
+  const count = (s: Status) => submissions.filter(sub => sub.status === s).length
+  const stats: { label: string; value: number; color: string; view: View }[] = [
+    { label: 'total', value: submissions.length, color: 'var(--color-dark)', view: 'all' },
+    {
+      label: 'open',
+      value: submissions.filter(s => isOpenStatus(s.status)).length,
+      color: 'var(--color-dark)',
+      view: 'open',
+    },
+    ...OPEN_STATUSES.map(s => ({
+      label: STATUS_LABELS[s], value: count(s), color: STATUS_COLORS[s], view: s as View,
+    })),
+    { label: 'resolved', value: count('resolved'), color: STATUS_COLORS.resolved, view: 'resolved' },
   ]
 
   const appCount = new Set(submissions.map(s => s.appId)).size
@@ -298,32 +398,43 @@ export default function Admin() {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Stats — each tile is also a shortcut to that view */}
       <div className="admin-stats">
         {stats.map(s => (
-          <div key={s.label} className="pixel-box" style={{ padding: '16px 20px', textAlign: 'center' }}>
+          <button
+            key={s.label}
+            onClick={() => setView(s.view)}
+            className="pixel-box"
+            title={`show ${s.label}`}
+            style={{
+              padding: '16px 20px', textAlign: 'center', cursor: 'pointer',
+              outline: view === s.view ? '3px solid var(--color-dark)' : 'none',
+              outlineOffset: 2,
+            }}
+          >
             <div className="pixel-font" style={{ fontSize: 22, color: s.color, marginBottom: 8 }}>{s.value}</div>
             <div className="retro-font" style={{ fontSize: 18, color: 'var(--color-muted)' }}>{s.label}</div>
-          </div>
+          </button>
         ))}
       </div>
 
-      {/* Toolbar: status presets + filter meta */}
+      {/* Toolbar: views + filter meta */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            {[{ v: '', label: 'all' }, ...STATUS_OPTIONS.map(s => ({ v: s, label: s }))].map(s => (
+            {VIEWS.map(v => (
               <button
-                key={s.label}
-                onClick={() => setFilter('status', s.v)}
+                key={v.v}
+                onClick={() => setView(v.v)}
                 className="retro-font"
+                title={v.v === 'open' ? 'everything not resolved or closed' : `status: ${v.label}`}
                 style={{
                   padding: '6px 14px', border: '3px solid var(--color-dark)', fontSize: 18, cursor: 'pointer',
-                  background: filters.status === s.v ? 'var(--color-dark)' : 'var(--color-bg)',
-                  color: filters.status === s.v ? 'var(--color-card)' : 'var(--color-dark)',
+                  background: view === v.v ? 'var(--color-dark)' : 'var(--color-bg)',
+                  color: view === v.v ? 'var(--color-card)' : 'var(--color-dark)',
                 }}
               >
-                {s.label}
+                {v.label}
               </button>
             ))}
           </div>
@@ -348,6 +459,12 @@ export default function Admin() {
         <p className="retro-font" style={{ fontSize: 16, color: 'var(--color-muted)' }}>
           tip: filter any column — use <strong>*</strong> as a wildcard (e.g. <code>WDA-*</code>, <code>*dark mode*</code>). click a header to sort.
         </p>
+        <p className="retro-font" style={{ fontSize: 16, color: 'var(--color-muted)' }}>
+          workflow: <strong>new → work in progress → resolved</strong> (<strong>pending</strong> while
+          you&apos;re waiting on someone). <strong>open</strong> = anything not resolved or closed.
+          you can&apos;t close a ticket by hand — mark it <strong>resolved</strong> and it closes
+          itself after {AUTO_CLOSE_DAYS} days, leaving time to test the fix.
+        </p>
       </div>
 
       {/* Bulk action bar — appears once rows are ticked */}
@@ -361,7 +478,8 @@ export default function Admin() {
           </span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="retro-font" style={{ fontSize: 17, color: 'var(--color-muted)' }}>set status →</span>
-            {STATUS_OPTIONS.map(s => (
+            {/* No `closed` button — closing is the auto-close sweep's job. */}
+            {SETTABLE_STATUSES.map(s => (
               <button
                 key={s}
                 onClick={() => bulkUpdateStatus(s)}
@@ -373,7 +491,7 @@ export default function Admin() {
                   cursor: bulkSaving ? 'default' : 'pointer', opacity: bulkSaving ? 0.5 : 1,
                 }}
               >
-                {s}
+                {STATUS_LABELS[s]}
               </button>
             ))}
           </div>
@@ -469,7 +587,8 @@ export default function Admin() {
           {/* Data rows */}
           {!loading && filtered.length === 0 && (
             <p className="retro-font" style={{ fontSize: 20, color: 'var(--color-muted)', padding: '22px 16px' }}>
-              no tickets match the current filters
+              no tickets in the <strong>{VIEWS.find(v => v.v === view)?.label ?? view}</strong> view
+              {activeFilterCount ? ' match the current filters' : ''}
             </p>
           )}
           {filtered.map((sub, i) => {
@@ -503,18 +622,23 @@ export default function Admin() {
                   <span className="retro-font" style={{ padding: '11px 12px', fontSize: 16, fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                     {sub.ref}
                   </span>
-                  <span style={{ padding: '11px 12px', whiteSpace: 'nowrap' }}>
+                  <span style={{ padding: '11px 12px', whiteSpace: 'nowrap' }} title={autoCloseNote(sub, now) || undefined}>
                     <span
                       className="retro-font"
                       style={{
-                        fontSize: 14, fontWeight: 'bold',
-                        color: STATUS_COLORS[sub.status] ?? 'var(--color-muted)',
-                        borderBottom: `2px solid ${STATUS_COLORS[sub.status] ?? 'var(--color-muted)'}`,
+                        fontSize: 14, fontWeight: 'bold', color: statusColor(sub.status),
+                        borderBottom: `2px solid ${statusColor(sub.status)}`,
                         paddingBottom: 1,
                       }}
                     >
-                      {sub.status}
+                      {statusLabel(sub.status)}
                     </span>
+                    {/* Days left before this resolved ticket auto-closes. */}
+                    {sub.status === 'resolved' && daysUntilAutoClose(sub.resolvedAt, now) !== null && (
+                      <span className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginLeft: 6 }}>
+                        ·{daysUntilAutoClose(sub.resolvedAt, now)}d
+                      </span>
+                    )}
                   </span>
                   <span className="retro-font" style={{ padding: '11px 12px', fontSize: 16, color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>
                     {sub.type}
@@ -573,11 +697,35 @@ export default function Admin() {
                         <select
                           className="form-select"
                           value={sub.status}
-                          onChange={e => updateStatus(sub.ref, e.target.value)}
+                          onChange={e => updateStatus(sub.ref, e.target.value as Status)}
                           style={{ width: 'auto' }}
                         >
-                          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                          {/* `closed` only ever appears as the (unselectable)
+                              current value of an already auto-closed ticket —
+                              picking anything else reopens it. */}
+                          {sub.status === 'closed' && (
+                            <option value="closed" disabled>{STATUS_LABELS.closed}</option>
+                          )}
+                          {SETTABLE_STATUSES.map(s => (
+                            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                          ))}
                         </select>
+                        {autoCloseNote(sub, now) && (
+                          <div
+                            className="retro-font"
+                            style={{ fontSize: 15, color: 'var(--color-muted)', marginTop: 8, maxWidth: 280 }}
+                          >
+                            {autoCloseNote(sub, now)}
+                          </div>
+                        )}
+                        {sub.status !== 'resolved' && sub.status !== 'closed' && (
+                          <div
+                            className="retro-font"
+                            style={{ fontSize: 15, color: 'var(--color-muted)', marginTop: 8, maxWidth: 280 }}
+                          >
+                            resolve it to start the {AUTO_CLOSE_DAYS}-day close countdown
+                          </div>
+                        )}
                       </div>
                       <div style={{ flex: 1, minWidth: 200 }}>
                         <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>INTERNAL NOTES</div>

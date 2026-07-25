@@ -33,12 +33,17 @@ submissions/{ref}
   appId:      string   // "portfolio" | "game-x" | "tool-y"
   trigram:    string   // "BEJ" | "GAM" | "TOL"
   type:       string   // "fault" | "request" | "idea" | "general"
-  status:     string   // "open" | "in-progress" | "done" | "wont-fix"
+  status:     string   // "new" | "in-progress" | "pending" | "resolved" | "closed"
+                       // canonical list: lib/status.ts. "closed" is set only by
+                       // the 7-day auto-close sweep, never by hand.
   name:       string
   email:      string
   message:    string
   timestamp:  datetime
   notes:      string   // internal notes, not visible to submitter
+  resolvedAt: datetime | null   // set on "resolved"; auto-close counts from here
+  closedAt:   datetime | null
+  autoClosed: boolean  | null   // true = closed by the 7-day sweep
 ```
 
 ---
@@ -51,7 +56,8 @@ submissions/{ref}
 - [x] Create `/admin` route (password protected)
 - [x] Submissions table view — filter by status and app
 - [x] Single submission view — update status, add internal notes
-- [x] Stats panel — total, open, in-progress, done counts
+- [x] Stats panel — total, open, new, work in progress, pending, resolved counts (tiles double as view switches)
+- [x] Status workflow — `new` → `in-progress` → `pending` → `resolved` → `closed`; `open` view = not resolved/closed; `closed` only via the 7-day auto-close sweep
 - [ ] AI Analysis button (see Epic 4)
 - [x] Move hosting to Cloudflare Pages — done, auto-deploys from main
 

@@ -104,17 +104,31 @@ export async function listSubmissions(
   return results.filter(r => r.document).map(r => fromDoc(r.document!))
 }
 
+/**
+ * Fields a submission update may touch. `null` clears a field (written as a
+ * Firestore null, which `fromField` reads back as `null`) — that's how
+ * `resolvedAt` / `closedAt` are cleared when a ticket moves back off
+ * `resolved` / `closed`.
+ */
+export interface SubmissionUpdate {
+  status?: string
+  notes?: string
+  resolvedAt?: Date | null
+  closedAt?: Date | null
+  autoClosed?: boolean | null
+}
+
 export async function updateSubmission(
   projectId: string,
   token: string,
   ref: string,
-  updates: { status?: string; notes?: string },
+  updates: SubmissionUpdate,
 ): Promise<void> {
-  const fields: string[] = []
-  const docFields: Record<string, unknown> = {}
-  if (updates.status !== undefined) { fields.push('status'); docFields.status = { stringValue: updates.status } }
-  if (updates.notes !== undefined) { fields.push('notes'); docFields.notes = { stringValue: updates.notes } }
+  const fields = Object.keys(updates).filter(k => updates[k as keyof SubmissionUpdate] !== undefined)
   if (fields.length === 0) return
+
+  const docFields: Record<string, unknown> = {}
+  for (const f of fields) docFields[f] = toField(updates[f as keyof SubmissionUpdate])
 
   const mask = fields.map(f => `updateMask.fieldPaths=${f}`).join('&')
   const res = await fetch(`${BASE}/${docName(projectId, 'submissions', ref)}?${mask}`, {
@@ -123,4 +137,37 @@ export async function updateSubmission(
     body: JSON.stringify({ name: docName(projectId, 'submissions', ref), fields: docFields }),
   })
   if (!res.ok) throw new Error(`Update failed: ${await res.text()}`)
+}
+
+/**
+ * Applies many partial submission updates in a single Firestore commit —
+ * used by the status sweep so a batch of auto-closes costs one write call
+ * instead of one per ticket. Each entry carries its own field mask, so only
+ * the named fields are touched.
+ */
+export async function commitSubmissionUpdates(
+  projectId: string,
+  token: string,
+  updates: { ref: string; fields: SubmissionUpdate }[],
+): Promise<void> {
+  const writes = updates
+    .map(({ ref, fields }) => {
+      const keys = Object.keys(fields).filter(k => fields[k as keyof SubmissionUpdate] !== undefined)
+      if (keys.length === 0) return null
+      const data: Record<string, unknown> = {}
+      for (const k of keys) data[k] = fields[k as keyof SubmissionUpdate]
+      return {
+        update: toDoc(docName(projectId, 'submissions', ref), data),
+        updateMask: { fieldPaths: keys },
+      }
+    })
+    .filter(Boolean)
+  if (writes.length === 0) return
+
+  const res = await fetch(`${BASE}/projects/${projectId}/databases/(default)/documents:commit`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ writes }),
+  })
+  if (!res.ok) throw new Error(`Batch update failed: ${await res.text()}`)
 }

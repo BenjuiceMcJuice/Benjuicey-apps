@@ -411,7 +411,10 @@
 
   .admin-stats {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    /* One tile per status bucket (total, open, new, work in progress,
+       pending, resolved) — auto-fit so they sit on one row when there's
+       room and wrap instead of squashing when there isn't. */
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
     gap: 16px;
   }
 

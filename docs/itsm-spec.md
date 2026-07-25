@@ -16,8 +16,9 @@ every phase keeps the existing feedback pipeline working and adds structure on t
 
 Right now every inbound item — bug report, feature idea, "just saying hi" — lands
 in one flat `submissions` collection with a coarse `type` (`bug` / `content` /
-`request` / `general`) and a simple `status` (`open` / `in-progress` / `done` /
-`wont-fix`). That's fine for a feedback inbox. It is **not** a service-management
+`request` / `general`) and a single `status` lifecycle (`new` / `in-progress` /
+`pending` / `resolved` / `closed` — built since this spec was written, see §6.3).
+That's fine for a feedback inbox. It is **not** a service-management
 process: there's no separation between "something is broken" (an **incident**) and
 "please add a thing" (a **service request**), no concept of a recurring root cause
 (a **problem**), no priority derived from impact and urgency, and no defined
@@ -184,20 +185,36 @@ migration is forced; a lazy backfill during triage is enough.
 | `problemRef` | string | `null` | the parent problem, if this incident is attached to one |
 | `slaDueAt` | timestamp | `null` | computed from `priority` + `timestamp` |
 | `assignee` | string | `"ben"` | single implementer today; kept for future |
-| `resolvedAt` | timestamp | `null` | set when status → `resolved` |
+| `resolvedAt` | timestamp | `null` | ✅ **built** — set when status → `resolved` |
 | `resolution` | string | `""` | short "what fixed it" note (feeds Change record / KB) |
 
-### Status: extend, don't break
+### 6.3 Status: ✅ built
 
-Keep the existing four values working; add the ITIL lifecycle states and map old →
-new so nothing in `PATCH /admin/submissions/:ref` breaks:
+The lifecycle half of phase 1 shipped ahead of the rest of the spec. The canonical
+enum lives in [`lib/status.ts`](../lib/status.ts), imported by both the Worker and
+the admin dashboard:
 
 ```
-old "open"        ≈ new "new" / "triaged" / "in-progress"
-old "in-progress" ≈ new "in-progress"
-old "done"        ≈ new "resolved" / "closed"
-old "wont-fix"    ≈ new "closed" (reason: won't-do)
+new → in-progress → resolved → closed
+        ↕
+      pending
 ```
+
+- **`open` is a view, not a status** — it means "anything not `resolved` or
+  `closed`" (`new` + `in-progress` + `pending`), and it's what the dashboard
+  lands on.
+- **`closed` is not settable.** `PATCH /admin/submissions/:ref` rejects it; a
+  ticket is marked `resolved` (which stamps `resolvedAt`) and auto-closes 7 days
+  later, leaving a window to test the fix. Reopening clears the clock.
+- The old four values were migrated in place by the same sweep that auto-closes
+  (`worker/src/sweep.ts`): `open` → `new`, `done` → `resolved`, `wont-fix` →
+  `closed`. Nothing stores them any more.
+
+Full write-up: [`feedback-how-it-works.md`](feedback-how-it-works.md) →
+"The ticket lifecycle".
+
+What this spec still adds on top: **per-`recordType`** state sets (§7), so the UI
+offers only the states valid for an incident vs a request vs a query.
 
 ### Collections
 
@@ -244,6 +261,13 @@ open → investigating → known-error(workaround) → resolved → closed
 A single canonical `status` enum covers all of these; the UI shows only the
 states valid for the row's `recordType`.
 
+> **Where this stands:** the shared spine — `new` → `in-progress` / `pending` →
+> `resolved` → `closed` — is built (§6.3) and applies to every ticket regardless
+> of type. The type-specific extras above (`triaged`, `approved`, `answered`,
+> `investigating`, `known-error`) are still proposed, and arrive with
+> `recordType`. `wont-fix` is gone: a won't-do item is `resolved` with a note
+> explaining why, and closes itself like anything else.
+
 ---
 
 ## 8. Where the logic lives (Worker + UI changes)
@@ -255,8 +279,9 @@ Grounded in the real stack — these are additive endpoints/fields, not a rewrit
   `sourceType: type`, `status: "new"`.
 - New `PATCH /admin/submissions/:ref` fields — accept `recordType`, `impact`,
   `urgency`, `priority`, `triage`, `linkedTo`, `problemRef`, `resolution`,
-  `assignee` (extend `updateSubmission` in `firestore.ts`; today it only allows
-  `status` + `notes`).
+  `assignee`. `updateSubmission` in `firestore.ts` now takes a typed field bag
+  (`status`, `notes`, `resolvedAt`, `closedAt`, `autoClosed`) with a generic
+  value encoder, so adding these is a matter of widening one interface.
 - New `POST /admin/triage` (batch) — accept an array of `{ ref, recordType,
   impact, urgency, triage }` so a triage run can write many records in one call.
 - New `problems` CRUD (mirror submissions) — phase 3.
@@ -354,7 +379,8 @@ dashboard always shows *who* triaged (`claude` vs `ben`) so nothing is a black b
 | Phase | Deliverable | Depends on |
 |---|---|---|
 | **0** | ✅ Technical fault table in `/admin` (columns, wildcard filters, default = open). | done |
-| **1** | Add `recordType` + `sourceType` + extended statuses to the schema; widen `updateSubmission`; queue presets + triage panel in the UI. | phase 0 |
+| **0.5** | ✅ Status lifecycle (`new`/`in-progress`/`pending`/`resolved`/`closed`), `open` as a view, 7-day auto-close + legacy migration sweep, widened `updateSubmission`. | done |
+| **1** | Add `recordType` + `sourceType` to the schema; per-type state sets; queue presets + triage panel in the UI. | phase 0.5 |
 | **2** | Impact/urgency → priority + `slaDueAt` (server-computed); *Overdue* queue. | phase 1 |
 | **3** | `problem` records + linking; duplicate linking. | phase 1 |
 | **4A** | Formal **manual Claude triage** run + write-back (`POST /admin/triage`). | phase 1 |

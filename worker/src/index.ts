@@ -1,8 +1,10 @@
 import { getAccessToken } from './auth'
-import { createSubmission, listSubmissions, updateSubmission } from './firestore'
+import { createSubmission, listSubmissions, updateSubmission, SubmissionUpdate } from './firestore'
 import { sendConfirmation, sendAdminNotification } from './email'
 import { getTrigram, APP_NAMES } from './trigrams'
 import { WIDGET_JS } from './widget'
+import { runStatusSweep } from './sweep'
+import { AUTO_CLOSE_DAYS, isStatus, SETTABLE_STATUSES } from '../../lib/status'
 
 export interface Env {
   GOOGLE_SERVICE_ACCOUNT_JSON: string
@@ -73,10 +75,13 @@ export default {
         }
 
         const token = await authToken(env)
+        // Every ticket starts at `new` — the first state of the status
+        // workflow (new → in-progress/pending → resolved → closed).
         const ref = await createSubmission(env.FIRESTORE_PROJECT_ID, token, trigram, {
-          appId, trigram, type: type ?? 'general', status: 'open',
+          appId, trigram, type: type ?? 'general', status: 'new',
           name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
           timestamp: new Date(), notes: '',
+          resolvedAt: null, closedAt: null, autoClosed: null,
         })
 
         // Emails are best-effort — a failure here must NOT fail a submission
@@ -119,10 +124,16 @@ export default {
     }
 
     // ── GET /admin/submissions ─────────────────────────────────────
+    // Sweeps before returning, so the dashboard never shows a ticket that
+    // should already have auto-closed (and so legacy statuses get rewritten
+    // the first time they're read). The sweep works off the list we just
+    // fetched — no extra reads, and no writes at all unless something is due.
     if (request.method === 'GET' && url.pathname === '/admin/submissions') {
       try {
         const token = await authToken(env)
-        const submissions = await listSubmissions(env.FIRESTORE_PROJECT_ID, token)
+        const listed = await listSubmissions(env.FIRESTORE_PROJECT_ID, token)
+        const { submissions, plan } = await runStatusSweep(env.FIRESTORE_PROJECT_ID, token, listed)
+        if (plan.length) console.log(`status sweep: ${plan.map(p => `${p.ref}=${p.reason}`).join(', ')}`)
         return new Response(JSON.stringify(submissions), {
           status: 200, headers: { ...cors, 'Content-Type': 'application/json' },
         })
@@ -135,13 +146,52 @@ export default {
     }
 
     // ── PATCH /admin/submissions/:ref ──────────────────────────────
+    // Status transitions are policed here: `closed` is not settable — a
+    // ticket is marked `resolved` and closes itself AUTO_CLOSE_DAYS later
+    // (see ./sweep.ts), which leaves a window to test the fix.
     if (request.method === 'PATCH' && url.pathname.startsWith('/admin/submissions/')) {
       try {
         const ref = url.pathname.split('/').pop()!
-        const updates = (await request.json()) as { status?: string; notes?: string }
+        const body = (await request.json()) as { status?: string; notes?: string }
+        const patch: SubmissionUpdate = {}
+
+        if (body.notes !== undefined) patch.notes = String(body.notes)
+
+        if (body.status !== undefined) {
+          const status = body.status
+          if (status === 'closed') {
+            return new Response(JSON.stringify({
+              error: `Cannot set "closed" directly — mark the ticket "resolved" and it auto-closes after ${AUTO_CLOSE_DAYS} days.`,
+            }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } })
+          }
+          if (!isStatus(status) || !SETTABLE_STATUSES.includes(status)) {
+            return new Response(JSON.stringify({
+              error: `Unknown status "${status}". Valid values: ${SETTABLE_STATUSES.join(', ')}.`,
+            }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } })
+          }
+          patch.status = status
+          // Resolving (re-resolving too) starts the auto-close clock;
+          // moving back to any other state clears it, so a reopened ticket
+          // isn't closed by a stale timestamp.
+          patch.resolvedAt = status === 'resolved' ? new Date() : null
+          patch.closedAt = null
+          patch.autoClosed = null
+        }
+
+        if (patch.status === undefined && patch.notes === undefined) {
+          return new Response(JSON.stringify({ error: 'Nothing to update' }), {
+            status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
+          })
+        }
+
         const token = await authToken(env)
-        await updateSubmission(env.FIRESTORE_PROJECT_ID, token, ref, updates)
-        return new Response(JSON.stringify({ success: true }), {
+        await updateSubmission(env.FIRESTORE_PROJECT_ID, token, ref, patch)
+        return new Response(JSON.stringify({
+          success: true,
+          status: patch.status,
+          // Lets the dashboard show the auto-close countdown without a refetch.
+          resolvedAt: patch.resolvedAt instanceof Date ? patch.resolvedAt.toISOString() : null,
+        }), {
           status: 200, headers: { ...cors, 'Content-Type': 'application/json' },
         })
       } catch (err) {
@@ -153,5 +203,18 @@ export default {
     }
 
     return new Response('Not found', { status: 404, headers: cors })
+  },
+
+  // ── Cron: nightly status sweep ─────────────────────────────────────
+  // Auto-close doesn't depend on anyone opening the dashboard. The GET
+  // handler sweeps too, so this is a safety net rather than the only path;
+  // both share one implementation, so a ticket can't be closed twice.
+  async scheduled(_event: ScheduledController, env: Env): Promise<void> {
+    const token = await authToken(env)
+    const listed = await listSubmissions(env.FIRESTORE_PROJECT_ID, token)
+    const { plan } = await runStatusSweep(env.FIRESTORE_PROJECT_ID, token, listed)
+    console.log(plan.length
+      ? `scheduled status sweep: ${plan.map(p => `${p.ref}=${p.reason}`).join(', ')}`
+      : 'scheduled status sweep: nothing due')
   },
 }

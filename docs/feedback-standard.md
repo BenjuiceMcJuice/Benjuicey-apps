@@ -47,6 +47,15 @@ Every submission — from an app or the portfolio — is exactly these fields:
 | `request` | Feature or content suggestion |
 | `general` | General feedback / just saying hi |
 
+### Status is the backend's business
+
+Apps never send a `status` — the Worker stamps every new submission `new` and it
+moves through one shared lifecycle (`new` → `in-progress` / `pending` →
+`resolved` → `closed`) in the admin dashboard. The canonical enum lives in
+[`lib/status.ts`](../lib/status.ts); the rules (including why `closed` can only
+be reached by the 7-day auto-close) are in
+[`feedback-how-it-works.md`](feedback-how-it-works.md#the-ticket-lifecycle-statuses).
+
 ## Two ways an app can conform
 
 1. **Drop in the shared widget (preferred for new apps).** One script tag, no form to build:

@@ -2,6 +2,13 @@ name = "benjuicey-feedback"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 
+# Nightly status sweep (03:30 UTC): tickets that have been `resolved` for
+# longer than the 7-day auto-close window become `closed`. The admin
+# dashboard's GET also sweeps, so this only matters for stretches where
+# nobody opens it. See `worker/src/sweep.ts`.
+[triggers]
+crons = ["30 3 * * *"]
+
 [vars]
 FIRESTORE_PROJECT_ID = "benjuicey-apps"
 # Where new-feedback notification emails go, via Resend. While Resend is in

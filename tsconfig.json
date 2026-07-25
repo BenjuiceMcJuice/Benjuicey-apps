@@ -19,5 +19,6 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "//exclude-worker": "worker/ is a separate Cloudflare Worker package with its own tsconfig (and its own @cloudflare/workers-types); typechecking it under the Next config fails on Worker globals like ScheduledController.",
+  "exclude": ["node_modules", "worker"]
 }
