@@ -114,6 +114,7 @@ export interface SubmissionUpdate {
   status?: string
   notes?: string
   closureCode?: string | null
+  closureNote?: string | null
   resolvedAt?: Date | null
   closedAt?: Date | null
   autoClosed?: boolean | null

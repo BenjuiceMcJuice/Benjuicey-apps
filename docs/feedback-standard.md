@@ -52,7 +52,8 @@ Every submission — from an app or the portfolio — is exactly these fields:
 Apps never send a `status` — the Worker stamps every new submission `new` and it
 moves through one shared lifecycle (`new` → `in-progress` / `pending` →
 `resolved` → `closed`) in the admin dashboard, ending with a **closure code**
-saying why (`fixed`, `wont-fix`, `duplicate`…). The canonical enums live in
+saying why (`fixed`, `wont-fix`, `duplicate`…) and an optional **closure note**
+with the specifics. The canonical enums live in
 [`lib/status.ts`](../lib/status.ts); the rules (including why `closed` can only
 be reached by the 7-day auto-close) are in
 [`feedback-how-it-works.md`](feedback-how-it-works.md#the-ticket-lifecycle-statuses).

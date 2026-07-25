@@ -48,7 +48,8 @@ email. Full write-up: **`docs/feedback-how-it-works.md`**; rules/schema:
   resolved/closed), not a stored value; `closed` is set **only** by the 7-day
   auto-close sweep (`worker/src/sweep.ts`) — the Worker rejects a hand-set
   `closed`; and resolving **requires** a `closureCode` (`fixed`, `wont-fix`,
-  `duplicate`, …) in the same request. Rules: `docs/feedback-how-it-works.md`.
+  `duplicate`, …) in the same request, with an optional free-text `closureNote`
+  for the specifics. Rules: `docs/feedback-how-it-works.md`.
 - A browser submission only reaches the Worker if the app's origin is in
   `ALLOWED_ORIGINS` (`worker/wrangler.toml`). Add an origin here **only** for a
   live portfolio app — and use its *real* origin (Dungeon of Montor is on

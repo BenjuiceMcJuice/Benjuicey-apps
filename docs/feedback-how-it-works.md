@@ -64,6 +64,7 @@ Each submission is one document at `submissions/{ref}`:
 | `timestamp` | date/time | Worker |
 | `notes` | `` (empty) | you, later, in the admin dashboard |
 | `closureCode` | `fixed` or null | Worker, when status → `resolved` (required — see below) |
+| `closureNote` | `was a stale localStorage key` or null | you, when resolving (optional free text, ≤500 chars) |
 | `resolvedAt` | date/time or null | Worker, when status → `resolved` (starts the auto-close clock) |
 | `closedAt` | date/time or null | Worker, when the ticket closes |
 | `autoClosed` | `true` / `false` / null | Worker (`true` = closed by the 7-day sweep) |
@@ -97,11 +98,20 @@ new ──▶ in-progress ──▶ resolved ──(7 days)──▶ closed
 "still on my plate" list. `open` is a *bucket*, not a status; nothing is ever
 stored with a status of `open`.
 
-### Closure codes — *why* a ticket ended
+### Closure codes and notes — *why* a ticket ended
 
-Resolving a ticket always says why. The code is stored on `closureCode`, shown
-in the dashboard's **CLOSURE** column (filterable and sortable like any other),
-and carries through to `closed`:
+Resolving a ticket always says why, in two parts:
+
+- **`closureCode`** — one of a fixed set (below). Required. It's the sortable,
+  filterable answer to "what happens to feedback?", shown in the dashboard's
+  **CLOSURE** column.
+- **`closureNote`** — optional free text (≤500 chars) for the specifics: *"was
+  a stale localStorage key"*, *"already covered by WDA-0007"*, *"single-player
+  by design; netcode is a whole other project"*. This is the bit that makes
+  sense of a ticket six months later. It's separate from `notes` (working
+  scratchpad) — the closure note is the *record of how it ended*.
+
+The codes, which carry through to `closed`:
 
 | Code | Use it when |
 |---|---|
@@ -116,13 +126,16 @@ and carries through to `closed`:
 
 The Worker **requires** a code in the same request that sets `resolved`, so a
 finished ticket can't exist with no explanation. In the dashboard, choosing
-"resolved" therefore doesn't save immediately: it arms a closure-code picker
-next to the status, and the two are sent together when you confirm. The bulk
-bar works the same way — a "resolve as…" picker rather than a plain button.
+"resolved" therefore doesn't save immediately: it arms a code picker and a note
+box next to the status, and all three are sent together when you confirm
+(`RESOLVE →`, disabled until a code is chosen — the note stays optional). The
+bulk bar works the same way, minus the note: a "resolve as…" picker rather than
+a plain button, since a note is per-ticket.
 
-Afterwards the code can be corrected on its own (a `closureCode`-only PATCH),
-which does **not** touch the status or restart the auto-close clock. Reopening a
-ticket clears the code, since it no longer applies.
+Afterwards the code and the note can each be corrected on their own (a
+`closureCode`- or `closureNote`-only PATCH), which does **not** touch the status
+or restart the auto-close clock. Reopening a ticket clears both, since they no
+longer apply.
 
 This is also where the retired `wont-fix` *status* went: it was never really a
 state, it was a reason. Old `wont-fix` records keep that meaning — the sweep
@@ -191,7 +204,7 @@ The portfolio site has a private admin page: **`https://benjuicey-apps.pages.dev
 - Wildcard filters and click-to-sort on every column, plus multi-select for bulk status changes
 - Click any item to read the full message, change its **status** and **closure code**, and add private **internal notes**
 - A `resolved` ticket shows how long until it auto-closes (`·4d` in the table, spelled out in the detail panel). `closed` isn't offered as a choice — see the lifecycle above.
-- The **CLOSURE** column shows why each finished ticket ended (`—` while it's still open), so `*won't*` in that column's filter is "everything I decided not to do"
+- The **CLOSURE** column shows why each finished ticket ended (`—` while it's still open), so `*won't*` in that column's filter is "everything I decided not to do". Hover a cell for the closure note.
 
 That's the whole management surface — it reads and writes through the Worker's admin endpoints.
 
@@ -219,15 +232,15 @@ a caller can work out the auto-close date without a second request.
 **Resolving must include a closure code** in the same request, or it's a 400:
 
 ```bash
-# Resolve, saying why
+# Resolve, saying why (closureNote optional, trimmed and capped at 500 chars)
 curl -X PATCH .../admin/submissions/WDA-0001 \
   -H "x-admin-password: YOUR_ADMIN_PASSWORD" -H "Content-Type: application/json" \
-  -d '{"status":"resolved","closureCode":"cannot-reproduce"}'
+  -d '{"status":"resolved","closureCode":"fixed","closureNote":"was a stale localStorage key"}'
 
-# Correct just the code later — status and the auto-close clock are untouched
+# Correct just the code or note later — status and the clock are untouched
 curl -X PATCH .../admin/submissions/WDA-0001 \
   -H "x-admin-password: YOUR_ADMIN_PASSWORD" -H "Content-Type: application/json" \
-  -d '{"closureCode":"fixed"}'
+  -d '{"closureNote":"was a stale localStorage key, cleared on version bump"}'
 ```
 
 > **The admin password is a secret.** It lives only as the `ADMIN_PASSWORD` secret in Cloudflare. Do not commit it to any repo. Provide it to Claude at the moment you ask for a triage run; Claude does not and should not store it.

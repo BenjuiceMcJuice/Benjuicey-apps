@@ -44,6 +44,8 @@ submissions/{ref}
   closureCode:string | null     // why it ended: fixed | implemented | answered |
                                 // wont-fix | duplicate | cannot-reproduce | spam
                                 // (required to resolve; "unspecified" = backfilled)
+  closureNote:string | null     // optional free text, <=500 chars: what actually
+                                // happened. distinct from `notes` (scratchpad)
   resolvedAt: datetime | null   // set on "resolved"; auto-close counts from here
   closedAt:   datetime | null
   autoClosed: boolean  | null   // true = closed by the 7-day sweep
@@ -62,6 +64,7 @@ submissions/{ref}
 - [x] Stats panel — total, open, new, work in progress, pending, resolved counts (tiles double as view switches)
 - [x] Status workflow — `new` → `in-progress` → `pending` → `resolved` → `closed`; `open` view = not resolved/closed; `closed` only via the 7-day auto-close sweep
 - [x] Closure codes — resolving requires a reason (fixed / implemented / answered / wont-fix / duplicate / cannot-reproduce / spam); own filterable column
+- [x] Closure notes — optional free-text "what actually happened", captured on resolve and editable after
 - [ ] AI Analysis button (see Epic 4)
 - [x] Move hosting to Cloudflare Pages — done, auto-deploys from main
 

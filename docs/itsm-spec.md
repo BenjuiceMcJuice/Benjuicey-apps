@@ -187,7 +187,7 @@ migration is forced; a lazy backfill during triage is enough.
 | `assignee` | string | `"ben"` | single implementer today; kept for future |
 | `resolvedAt` | timestamp | `null` | ✅ **built** — set when status → `resolved` |
 | `closureCode` | string | `null` | ✅ **built** — *why* it ended; required to resolve (§6.3) |
-| `resolution` | string | `""` | free-text "what fixed it" note, distinct from the coded `closureCode` (feeds Change record / KB) |
+| `closureNote` | string | `null` | ✅ **built** — the free-text "what fixed it" line this table originally called `resolution`; optional, ≤500 chars. Feeds a future Change record / KB. |
 
 ### 6.3 Status: ✅ built
 
@@ -209,8 +209,9 @@ new → in-progress → resolved → closed
   later, leaving a window to test the fix. Reopening clears the clock.
 - **Resolving carries a closure code** (`fixed` / `implemented` / `answered` /
   `wont-fix` / `duplicate` / `cannot-reproduce` / `spam`), required by the
-  Worker in the same request. This is the ITIL *resolution code*, and it's where
-  the old `wont-fix` status belongs — a reason, not a state.
+  Worker in the same request, plus an optional free-text `closureNote`. This is
+  the ITIL *resolution code* (and resolution text), and it's where the old
+  `wont-fix` status belongs — a reason, not a state.
 - The old four values were migrated in place by the same sweep that auto-closes
   (`worker/src/sweep.ts`): `open` → `new`, `done` → `resolved` (code
   `unspecified`), `wont-fix` → `closed` (code `wont-fix`). Nothing stores them
@@ -284,10 +285,11 @@ Grounded in the real stack — these are additive endpoints/fields, not a rewrit
 - `POST /submit` — unchanged for callers; internally stamps `recordType: null`,
   `sourceType: type`, `status: "new"`.
 - New `PATCH /admin/submissions/:ref` fields — accept `recordType`, `impact`,
-  `urgency`, `priority`, `triage`, `linkedTo`, `problemRef`, `resolution`,
-  `assignee`. `updateSubmission` in `firestore.ts` now takes a typed field bag
-  (`status`, `notes`, `resolvedAt`, `closedAt`, `autoClosed`) with a generic
-  value encoder, so adding these is a matter of widening one interface.
+  `urgency`, `priority`, `triage`, `linkedTo`, `problemRef`, `assignee`.
+  `updateSubmission` in `firestore.ts` now takes a typed field bag (`status`,
+  `notes`, `closureCode`, `closureNote`, `resolvedAt`, `closedAt`, `autoClosed`)
+  with a generic value encoder, so adding these is a matter of widening one
+  interface.
 - New `POST /admin/triage` (batch) — accept an array of `{ ref, recordType,
   impact, urgency, triage }` so a triage run can write many records in one call.
 - New `problems` CRUD (mirror submissions) — phase 3.
@@ -385,14 +387,14 @@ dashboard always shows *who* triaged (`claude` vs `ben`) so nothing is a black b
 | Phase | Deliverable | Depends on |
 |---|---|---|
 | **0** | ✅ Technical fault table in `/admin` (columns, wildcard filters, default = open). | done |
-| **0.5** | ✅ Status lifecycle (`new`/`in-progress`/`pending`/`resolved`/`closed`), `open` as a view, 7-day auto-close + legacy migration sweep, closure codes on resolve, widened `updateSubmission`. | done |
+| **0.5** | ✅ Status lifecycle (`new`/`in-progress`/`pending`/`resolved`/`closed`), `open` as a view, 7-day auto-close + legacy migration sweep, closure codes + notes on resolve, widened `updateSubmission`. | done |
 | **1** | Add `recordType` + `sourceType` to the schema; per-type state sets; queue presets + triage panel in the UI. | phase 0.5 |
 | **2** | Impact/urgency → priority + `slaDueAt` (server-computed); *Overdue* queue. | phase 1 |
 | **3** | `problem` records + linking; duplicate linking. | phase 1 |
 | **4A** | Formal **manual Claude triage** run + write-back (`POST /admin/triage`). | phase 1 |
 | **4B** | **Scheduled** triage (propose-only digest). | 4A |
 | **4C** | **Trigger-on-new** triage via Worker `waitUntil` + Claude API; gated auto-apply. | 4A/4B |
-| **5** | Resolution notes → lightweight `change` records + a tiny known-error/KB view. | phase 3 |
+| **5** | `closureNote` → lightweight `change` records + a tiny known-error/KB view. | phase 3 |
 
 Each phase is independently shippable and leaves the feedback pipeline intact.
 

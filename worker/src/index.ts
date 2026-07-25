@@ -5,7 +5,8 @@ import { getTrigram, APP_NAMES } from './trigrams'
 import { WIDGET_JS } from './widget'
 import { runStatusSweep } from './sweep'
 import {
-  AUTO_CLOSE_DAYS, SELECTABLE_CLOSURE_CODES, SETTABLE_STATUSES, isClosureCode, isStatus,
+  AUTO_CLOSE_DAYS, SELECTABLE_CLOSURE_CODES, SETTABLE_STATUSES,
+  isClosureCode, isStatus, normaliseClosureNote,
 } from '../../lib/status'
 
 export interface Env {
@@ -83,7 +84,8 @@ export default {
           appId, trigram, type: type ?? 'general', status: 'new',
           name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
           timestamp: new Date(), notes: '',
-          closureCode: null, resolvedAt: null, closedAt: null, autoClosed: null,
+          closureCode: null, closureNote: null,
+          resolvedAt: null, closedAt: null, autoClosed: null,
         })
 
         // Emails are best-effort — a failure here must NOT fail a submission
@@ -155,7 +157,7 @@ export default {
       try {
         const ref = url.pathname.split('/').pop()!
         const body = (await request.json()) as {
-          status?: string; notes?: string; closureCode?: string
+          status?: string; notes?: string; closureCode?: string; closureNote?: string
         }
         const patch: SubmissionUpdate = {}
         const bad = (error: string) => new Response(JSON.stringify({ error }), {
@@ -164,13 +166,15 @@ export default {
 
         if (body.notes !== undefined) patch.notes = String(body.notes)
 
-        // A closure code on its own is how you correct the "why" of an
-        // already-resolved (or closed) ticket without touching its status or
-        // restarting the auto-close clock.
+        // A closure code (or note) on its own is how you correct the "why" of
+        // an already-resolved (or closed) ticket without touching its status
+        // or restarting the auto-close clock.
         if (body.closureCode !== undefined && !isClosureCode(body.closureCode)) {
           return bad(`Unknown closure code "${body.closureCode}". Valid values: ${SELECTABLE_CLOSURE_CODES.join(', ')}.`)
         }
         if (body.closureCode !== undefined) patch.closureCode = body.closureCode
+        // Optional free text; blank means "no note", and it's length-capped.
+        if (body.closureNote !== undefined) patch.closureNote = normaliseClosureNote(body.closureNote)
 
         if (body.status !== undefined) {
           const status = body.status
@@ -196,12 +200,14 @@ export default {
           } else {
             patch.resolvedAt = null
             patch.closureCode = null
+            patch.closureNote = null
           }
           patch.closedAt = null
           patch.autoClosed = null
         }
 
-        if (patch.status === undefined && patch.notes === undefined && patch.closureCode === undefined) {
+        if (patch.status === undefined && patch.notes === undefined
+          && patch.closureCode === undefined && patch.closureNote === undefined) {
           return bad('Nothing to update')
         }
 
@@ -211,6 +217,8 @@ export default {
           success: true,
           status: patch.status,
           closureCode: patch.closureCode,
+          // Echoed back trimmed/capped, so the UI shows what was stored.
+          closureNote: patch.closureNote,
           // Lets the dashboard show the auto-close countdown without a refetch.
           resolvedAt: patch.resolvedAt instanceof Date ? patch.resolvedAt.toISOString() : null,
         }), {

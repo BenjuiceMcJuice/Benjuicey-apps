@@ -348,3 +348,46 @@ So resolving in the dashboard is deliberately two steps:
   and confirming sends exactly one PATCH with
   `{status: resolved, closureCode: cannot-reproduce}`. Bulk "resolve as → spam"
   sends the same shape. Closure select is disabled on tickets that aren't done.
+
+---
+
+## 2026-07-25 (session 3) — Closure notes
+
+The closure code says *which kind* of ending; it can't say what actually
+happened. Added `closureNote` — optional free text (≤500 chars, trimmed, blank
+means none) captured at the same moment as the code.
+
+It's deliberately separate from `notes`: `notes` is the working scratchpad
+("reproduced", "waiting on Sam"), the closure note is the **record of how it
+ended** — "was a stale localStorage key", "already covered by WDA-0007",
+"single-player by design; netcode is a whole other project". This is the
+free-text resolution field `itsm-spec.md` had penciled in as `resolution`; it's
+now built under the name that pairs with `closureCode`.
+
+### Where it appears
+- **Resolving**: the armed block is now `CLOSURE CODE + NOTE` — code picker,
+  note box, `RESOLVE →`, cancel. The note is optional, so the confirm button
+  still gates on the code only; Enter in the note box confirms.
+- **Afterwards**: its own `CLOSURE NOTE` field with a SAVE, sending a
+  `closureNote`-only PATCH — so editing it doesn't touch the status or restart
+  the auto-close clock. Disabled (with an explanatory placeholder) on tickets
+  that aren't resolved/closed, same as the code.
+- **The table**: no new column. The CLOSURE cell's tooltip is now the note when
+  there is one, falling back to the code's generic hint.
+- Bulk resolves take a code but no note (a note is per-ticket) and clear any
+  stale one rather than leaving it attached to a different outcome.
+- Reopening clears the note along with the code.
+
+### Layout
+The detail panel was getting cramped with four controls across, squeezing both
+note inputs to ~130px. Split it into two rows — STATUS + CLOSURE CODE above,
+CLOSURE NOTE + INTERNAL NOTES side by side below — so both notes have real
+width. The table itself is unchanged.
+
+### Verified
+- `next build` + worker `tsc` clean.
+- Driven in a browser against a mock Worker that mirrors the real trim/blank
+  handling: the note is locked on an open ticket; arming still sends **zero**
+  requests; confirm stays disabled with a note but no code; confirming sends one
+  PATCH with `{status, closureCode, closureNote}`; editing an existing note
+  sends `{closureNote}` alone; a closed row's CLOSURE tooltip shows its note.

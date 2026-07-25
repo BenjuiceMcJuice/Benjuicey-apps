@@ -93,13 +93,16 @@ export function statusColor(value: unknown): string {
   return STATUS_COLORS[normaliseStatus(value)]
 }
 
-// ─── closure codes ───────────────────────────────────────────────────
-// *Why* a ticket ended, stored on `closureCode`. Set when a ticket is
-// resolved — the Worker requires one in the same request, so "resolved" is
-// never a dead end with no explanation. It then carries through to `closed`.
+// ─── closure codes & notes ───────────────────────────────────────────
+// *Why* a ticket ended: a required code (`closureCode`) plus an optional
+// free-text line (`closureNote`). Both are set when a ticket is resolved —
+// the Worker requires the code in the same request, so "resolved" is never a
+// dead end with no explanation — and carry through to `closed`.
 //
-// Deliberately kept to a handful: enough to answer "what actually happens to
-// feedback?" without turning triage into form-filling.
+// The code is deliberately one of a handful: enough to answer "what actually
+// happens to feedback?" by sorting a column, without turning triage into
+// form-filling. The note is where the specifics go ("was a stale
+// localStorage key", "already covered by WDA-0007").
 
 export const CLOSURE_CODES = [
   'fixed',
@@ -153,10 +156,24 @@ export function closureCodeLabel(value: unknown): string {
   return isClosureCode(value) ? CLOSURE_CODE_LABELS[value] : ''
 }
 
-/** Statuses that carry a closure code. */
+/** Statuses that carry a closure code (and note). */
 export function takesClosureCode(status: unknown): boolean {
   const s = normaliseStatus(status)
   return s === 'resolved' || s === 'closed'
+}
+
+/**
+ * Longest closure note we store. It's a "what actually happened" line to jog
+ * your memory in six months — not a changelog entry — so it's capped rather
+ * than unbounded. The Worker truncates to this; the UI's input matches it.
+ */
+export const CLOSURE_NOTE_MAX = 500
+
+/** Trims a closure note, treating blank as "no note". */
+export function normaliseClosureNote(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim().slice(0, CLOSURE_NOTE_MAX)
+  return trimmed === '' ? null : trimmed
 }
 
 // ─── auto-close policy ───────────────────────────────────────────────
