@@ -74,7 +74,7 @@ be reached by the 7-day auto-close) are in
 ## Adding a new app
 
 1. Pick a 3-letter trigram and register it in `worker/src/trigrams.ts` (`TRIGRAMS` + `APP_NAMES`).
-2. Add the app's live origin(s) to `ALLOWED_ORIGINS` in `worker/wrangler.toml`, then redeploy the Worker (`cd worker && npx wrangler deploy`).
+2. Add the app's live origin(s) to `ALLOWED_ORIGINS` in `worker/wrangler.toml` and merge to `main` — the Worker redeploys itself (`.github/workflows/deploy-worker.yml`). See [`feedback-how-it-works.md`](feedback-how-it-works.md#deploying-the-worker).
 3. Embed the widget (or conform your own form) with the new `appId`.
 
 ## Adoption status

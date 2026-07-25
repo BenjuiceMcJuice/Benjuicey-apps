@@ -50,6 +50,11 @@ email. Full write-up: **`docs/feedback-how-it-works.md`**; rules/schema:
   `closed`; and resolving **requires** a `closureCode` (`fixed`, `wont-fix`,
   `duplicate`, …) in the same request, with an optional free-text `closureNote`
   for the specifics. Rules: `docs/feedback-how-it-works.md`.
+- **The Worker deploys itself** via `.github/workflows/deploy-worker.yml` on any
+  push to `main` touching `worker/**` or `lib/**` (also dispatchable from the
+  Actions tab). Don't tell Ben to run `wrangler deploy` by hand — merging is the
+  deploy, and it must stay that way so a phone-only session can ship. Worker
+  *secrets* are still set in the Cloudflare dashboard, not in CI.
 - A browser submission only reaches the Worker if the app's origin is in
   `ALLOWED_ORIGINS` (`worker/wrangler.toml`). Add an origin here **only** for a
   live portfolio app — and use its *real* origin (Dungeon of Montor is on

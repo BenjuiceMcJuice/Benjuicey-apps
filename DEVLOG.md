@@ -391,3 +391,64 @@ width. The table itself is unchanged.
   requests; confirm stays disabled with a note but no code; confirming sends one
   PATCH with `{status, closureCode, closureNote}`; editing an existing note
   sends `{closureNote}` alone; a closed row's CLOSURE tooltip shows its note.
+
+---
+
+## 2026-07-25 (session 4) — The Worker deploys itself
+
+The Pages site has always deployed on push to `main`; the Worker needed
+`cd worker && npx wrangler deploy` from a machine with `wrangler login`. That
+made it the one piece of this platform that couldn't be shipped from a phone —
+and the one that could silently drift behind the frontend (an old Worker with a
+new dashboard quietly drops fields it doesn't know about).
+
+**`.github/workflows/deploy-worker.yml`** fixes both:
+
+- Triggers on pushes to `main` touching `worker/**`, `lib/**`, or the workflow
+  itself. `lib/` is in there deliberately — the Worker imports `lib/status.ts`,
+  so a change to the status model or the auto-close window needs a Worker
+  deploy, and it would be easy to forget that it isn't "just frontend".
+- Also `workflow_dispatch`, with a **dry run** checkbox that typechecks and
+  bundles without deploying — handy for verifying the token from a phone.
+- Uses the repo's own pinned wrangler (`npm ci` in `worker/`) rather than a
+  third-party action, so CI runs exactly what a laptop would.
+- Typechecks before deploying; a Worker that doesn't compile never ships.
+- `concurrency: worker-deploy` with `cancel-in-progress: false` — queue deploys,
+  never cancel one mid-flight.
+- Writes a step summary saying what happened and at which commit.
+
+Needs one repo secret, `CLOUDFLARE_API_TOKEN` (Cloudflare's "Edit Cloudflare
+Workers" template), plus `CLOUDFLARE_ACCOUNT_ID` only if the token can see more
+than one account. That token deploys *code*; the Worker's own secrets
+(`GOOGLE_SERVICE_ACCOUNT_JSON`, `RESEND_API_KEY`, `ADMIN_PASSWORD`) stay in
+Cloudflare and are untouched by a deploy.
+
+### Phone-only from here
+Every operational task on this platform is now doable from a browser:
+
+| Task | Where |
+|---|---|
+| Deploy the Worker | merge, or Actions → Deploy Worker → Run workflow |
+| Deploy the site | merge (unchanged) |
+| Change a Worker secret | Cloudflare dashboard → Variables (encrypt) |
+| Change `ALLOWED_ORIGINS` / the cron | edit `wrangler.toml`, merge |
+
+Documented in `docs/feedback-how-it-works.md` → "Deploying the Worker", with the
+token setup steps and a note on deploy ordering. `feedback-standard.md`'s
+"adding a new app" step no longer tells you to run wrangler by hand, and
+`CLAUDE.md` now says merging *is* the deploy — so a future session doesn't
+regress to "run this in your terminal".
+
+Also fixed while here: the Resend setup step said to set the secret with
+`wrangler secret put` and redeploy. Secrets take effect immediately with no
+redeploy, and the dashboard can set them — both now noted.
+
+### Verified
+- Workflow YAML parses; step list and both triggers are as intended. The
+  `inputs.dry_run` guards behave correctly on `push` (where `inputs` is empty):
+  deploy runs, dry-run step skips.
+- `npm ci` in `worker/` from a clean `node_modules` succeeds and leaves the
+  lockfile untouched, then `tsc --noEmit` passes — i.e. the workflow's first two
+  steps work against the committed lockfile.
+- Not yet run for real: it can't be, until `CLOUDFLARE_API_TOKEN` exists. First
+  dispatch is the real test.

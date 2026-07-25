@@ -172,6 +172,48 @@ finished ticket carries a closure code.
 
 ---
 
+## Deploying the Worker
+
+**The Worker deploys itself.** `.github/workflows/deploy-worker.yml` runs
+`wrangler deploy` whenever a push to `main` touches `worker/**` or `lib/**` — so
+it can't silently fall behind the Pages site, which has always deployed on push.
+That workflow is also what registers the `[triggers]` cron from `wrangler.toml`.
+
+Nothing here needs a terminal, which means the whole loop works from a phone:
+
+| To do this | Do it here |
+|---|---|
+| Deploy the current `main` | happens on merge, or **Actions → Deploy Worker → Run workflow** |
+| Check it worked | the run's summary line, or ask Claude Code |
+| Validate without deploying | Run workflow with **dry run** ticked |
+| Change a Worker secret | Cloudflare dashboard → Workers & Pages → `benjuicey-feedback` → Settings → Variables (encrypt it) |
+| Change `ALLOWED_ORIGINS` / cron | edit `worker/wrangler.toml`, merge — the deploy follows |
+
+Setting up the one secret it needs (a browser, phone or laptop, is enough):
+
+1. Cloudflare → **My Profile → API Tokens → Create Token →** use the **Edit
+   Cloudflare Workers** template. Copy the token.
+2. GitHub → this repo → **Settings → Secrets and variables → Actions → New
+   repository secret**, named `CLOUDFLARE_API_TOKEN`. (Use the browser — the
+   GitHub mobile app can't add secrets or dispatch workflows.)
+3. Only if that token can see more than one Cloudflare account, add
+   `CLOUDFLARE_ACCOUNT_ID` the same way. Otherwise it's inferred.
+
+The token lets the workflow deploy code. It does **not** touch the Worker's own
+secrets (`GOOGLE_SERVICE_ACCOUNT_JSON`, `RESEND_API_KEY`, `ADMIN_PASSWORD`) —
+those live in Cloudflare and a deploy leaves them exactly as they are.
+
+By hand from a laptop, if you'd rather: `cd worker && npx wrangler deploy` (needs
+`npx wrangler login` once).
+
+> **Deploy order matters a little.** The Worker validates statuses, so a *new*
+> Worker with an *old* dashboard rejects the statuses that dashboard sends, and
+> an *old* Worker with a *new* dashboard silently drops fields it doesn't know.
+> Neither loses data, but keep the gap short — merging Worker and dashboard
+> changes together does that automatically.
+
+---
+
 ## Emails & notifications
 
 Notifications go through **Resend**, an email API built for server-side sending. It's best-effort: a send failure never blocks a submission that's already saved to Firestore.
@@ -185,7 +227,7 @@ Notifications go through **Resend**, an email API built for server-side sending.
 ### Turning email on (Resend)
 
 1. Create a [Resend](https://resend.com) account. **Sign up with the email you want notifications to land in** (`benjuice.apps@gmail.com` — it already matches `ADMIN_EMAIL`) — in test mode the `onboarding@resend.dev` sender can only deliver to that account's own address.
-2. Grab an API key (starts with `re_`) and set it as the Worker secret: `cd worker && npx wrangler secret put RESEND_API_KEY` (paste the key), then `npx wrangler deploy`.
+2. Grab an API key (starts with `re_`) and set it as the Worker secret — either in the Cloudflare dashboard (Workers & Pages → `benjuicey-feedback` → Settings → Variables → add `RESEND_API_KEY`, **encrypt**; works from a phone) or with `cd worker && npx wrangler secret put RESEND_API_KEY`. Secrets take effect immediately; no redeploy needed.
 3. Submit a test — the admin notification should land with no spam filtering. To also send **confirmation emails to submitters**, verify a domain on Resend and change the `from:` address in `email.ts` off `onboarding@resend.dev`.
 
 Until this is done, feedback still saves fine — you just read it in the admin dashboard, and the "ask Claude to categorise" workflow below is the way to stay on top of it.
