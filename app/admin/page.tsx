@@ -607,15 +607,11 @@ export default function Admin() {
         <p className="retro-font" style={{ fontSize: 16, color: 'var(--color-muted)' }}>
           tip: filter any column — use <strong>*</strong> as a wildcard (e.g. <code>WDA-*</code>, <code>*dark mode*</code>). click a header to sort.
         </p>
-        <p className="retro-font" style={{ fontSize: 16, color: 'var(--color-muted)' }}>
-          workflow: <strong>new → work in progress → resolved</strong> (<strong>pending</strong> while
-          you&apos;re waiting on someone). <strong>open</strong> = anything not resolved or closed.
-          both ends are automatic: <strong>new</strong> means untouched so nothing goes back to it,
-          and you can&apos;t close a ticket by hand — mark it <strong>resolved</strong> and it closes
-          itself after {AUTO_CLOSE_DAYS} days, leaving time to test the fix.
-          resolving always asks <strong>why</strong> — the closure code (fixed, won&apos;t fix,
-          duplicate…) sticks with the ticket and is filterable like any column.
-        </p>
+        {/* The lifecycle rules used to be spelled out here. They're enforced by
+            the controls themselves — unsettable statuses are greyed out, the
+            resolve action demands a closure code, resolved rows show their own
+            countdown — so the paragraph was just noise above the table.
+            Written up in docs/feedback-how-it-works.md instead. */}
       </div>
 
       {/* Bulk action bar — appears once rows are ticked */}
