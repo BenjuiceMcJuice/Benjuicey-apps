@@ -178,6 +178,10 @@ export default {
 
         if (body.status !== undefined) {
           const status = body.status
+          // The two ends of the lifecycle are the system's to assign.
+          if (status === 'new') {
+            return bad('Cannot set "new" — it marks a ticket nobody has looked at yet, and is stamped on arrival. Use "in-progress" or "pending" instead.')
+          }
           if (status === 'closed') {
             return bad(`Cannot set "closed" directly — mark the ticket "resolved" and it auto-closes after ${AUTO_CLOSE_DAYS} days.`)
           }

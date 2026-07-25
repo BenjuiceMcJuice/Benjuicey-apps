@@ -204,9 +204,11 @@ new → in-progress → resolved → closed
 - **`open` is a view, not a status** — it means "anything not `resolved` or
   `closed`" (`new` + `in-progress` + `pending`), and it's what the dashboard
   lands on.
-- **`closed` is not settable.** `PATCH /admin/submissions/:ref` rejects it; a
-  ticket is marked `resolved` (which stamps `resolvedAt`) and auto-closes 7 days
-  later, leaving a window to test the fix. Reopening clears the clock.
+- **Neither end is settable.** `PATCH /admin/submissions/:ref` rejects both
+  `new` (stamped on arrival; "untouched" can't be re-asserted) and `closed` (a
+  ticket is marked `resolved`, which stamps `resolvedAt`, and auto-closes 7 days
+  later — a window to test the fix). Reopening goes to `in-progress`/`pending`
+  and clears the clock.
 - **Resolving carries a closure code** (`fixed` / `implemented` / `answered` /
   `wont-fix` / `duplicate` / `cannot-reproduce` / `spam`), required by the
   Worker in the same request, plus an optional free-text `closureNote`. This is

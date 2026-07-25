@@ -610,7 +610,8 @@ export default function Admin() {
         <p className="retro-font" style={{ fontSize: 16, color: 'var(--color-muted)' }}>
           workflow: <strong>new → work in progress → resolved</strong> (<strong>pending</strong> while
           you&apos;re waiting on someone). <strong>open</strong> = anything not resolved or closed.
-          you can&apos;t close a ticket by hand — mark it <strong>resolved</strong> and it closes
+          both ends are automatic: <strong>new</strong> means untouched so nothing goes back to it,
+          and you can&apos;t close a ticket by hand — mark it <strong>resolved</strong> and it closes
           itself after {AUTO_CLOSE_DAYS} days, leaving time to test the fix.
           resolving always asks <strong>why</strong> — the closure code (fixed, won&apos;t fix,
           duplicate…) sticks with the ticket and is filterable like any column.
@@ -902,11 +903,12 @@ export default function Admin() {
                           }}
                           style={{ width: 'auto' }}
                         >
-                          {/* `closed` only ever appears as the (unselectable)
-                              current value of an already auto-closed ticket —
-                              picking anything else reopens it. */}
-                          {sub.status === 'closed' && (
-                            <option value="closed" disabled>{STATUS_LABELS.closed}</option>
+                          {/* The system-assigned ends of the lifecycle (`new`
+                              on arrival, `closed` by the sweep) appear only as
+                              the current value, greyed out — picking anything
+                              else moves the ticket on, or reopens it. */}
+                          {!SETTABLE_STATUSES.includes(sub.status) && (
+                            <option value={sub.status} disabled>{STATUS_LABELS[sub.status]}</option>
                           )}
                           {SETTABLE_STATUSES.map(s => (
                             <option key={s} value={s}>{STATUS_LABELS[s]}</option>

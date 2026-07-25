@@ -45,9 +45,11 @@ email. Full write-up: **`docs/feedback-how-it-works.md`**; rules/schema:
   imported by both the Worker and the `/admin` dashboard, so never hardcode
   either string in either place. The lifecycle is `new` → `in-progress` /
   `pending` → `resolved` → `closed`; "open" is a *view* (anything not
-  resolved/closed), not a stored value; `closed` is set **only** by the 7-day
-  auto-close sweep (`worker/src/sweep.ts`) — the Worker rejects a hand-set
-  `closed`; and resolving **requires** a `closureCode` (`fixed`, `wont-fix`,
+  resolved/closed), not a stored value; **both ends are system-assigned** —
+  `new` is stamped by `POST /submit` and `closed` only by the 7-day auto-close
+  sweep (`worker/src/sweep.ts`), and the Worker rejects either if hand-set, so
+  only `in-progress`/`pending`/`resolved` are settable; and resolving
+  **requires** a `closureCode` (`fixed`, `wont-fix`,
   `duplicate`, …) in the same request, with an optional free-text `closureNote`
   for the specifics. Rules: `docs/feedback-how-it-works.md`.
 - **The Worker deploys itself** via `.github/workflows/deploy-worker.yml` on any

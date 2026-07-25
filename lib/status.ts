@@ -11,9 +11,11 @@
  *          ↕
  *        pending          (waiting on someone/something else)
  *
- * `closed` is terminal and is NEVER set by hand — a `resolved` ticket
- * auto-closes AUTO_CLOSE_DAYS days later, which leaves a window to test
- * the fix and reopen if it didn't hold.
+ * Both ends are assigned by the system, never by hand (see
+ * SYSTEM_STATUSES): `new` is stamped when a submission arrives and nothing
+ * moves back to it, and `closed` arrives on its own AUTO_CLOSE_DAYS days
+ * after a ticket is resolved — a window to test the fix and reopen if it
+ * didn't hold.
  */
 export const STATUSES = ['new', 'in-progress', 'pending', 'resolved', 'closed'] as const
 
@@ -29,10 +31,25 @@ export const STATUS_LABELS: Record<Status, string> = {
 }
 
 /**
- * Statuses a human may set directly. `closed` is deliberately absent:
- * you resolve a ticket and the 7-day timer closes it.
+ * Statuses a human may set directly — the middle of the lifecycle only.
+ * Both ends are excluded on purpose: see SYSTEM_STATUSES.
  */
-export const SETTABLE_STATUSES: Status[] = ['new', 'in-progress', 'pending', 'resolved']
+export const SETTABLE_STATUSES: Status[] = ['in-progress', 'pending', 'resolved']
+
+/**
+ * Statuses only the system assigns, so they mean something you can trust:
+ *
+ * - `new` — stamped by `POST /submit` on arrival. It marks "nobody has
+ *   looked at this yet", which stops being true the moment you touch the
+ *   ticket, so there's no way back to it. Reopening something goes to
+ *   `in-progress` or `pending`.
+ * - `closed` — set only by the auto-close sweep, AUTO_CLOSE_DAYS after a
+ *   resolve.
+ *
+ * The Worker rejects either one in a PATCH; the dashboard shows the current
+ * value but won't offer it as a choice.
+ */
+export const SYSTEM_STATUSES: Status[] = ['new', 'closed']
 
 /**
  * The "open" view = everything still on someone's plate, i.e. anything

@@ -79,19 +79,32 @@ Five statuses, in workflow order. The canonical list lives in one place —
 [`lib/status.ts`](../lib/status.ts) — which both the Worker and the admin
 dashboard import, so the backend and the UI can't drift.
 
-| Status | Meaning |
-|---|---|
-| `new` | Just landed, not looked at yet. Every submission starts here. |
-| `in-progress` | Being worked on. Shown as **work in progress**. |
-| `pending` | Parked, waiting on someone or something else (a reply, an upstream fix). |
-| `resolved` | Believed fixed/answered. Still visible, still reopenable. |
-| `closed` | Done and settled. **Set automatically, never by hand.** |
+| Status | Meaning | Set by |
+|---|---|---|
+| `new` | Just landed, nobody has looked at it yet. | **the Worker, on arrival** |
+| `in-progress` | Being worked on. Shown as **work in progress**. | you |
+| `pending` | Parked, waiting on someone or something else (a reply, an upstream fix). | you |
+| `resolved` | Believed fixed/answered. Still visible, still reopenable. | you (with a closure code) |
+| `closed` | Done and settled. | **the auto-close sweep** |
 
 ```
 new ──▶ in-progress ──▶ resolved ──(7 days)──▶ closed
           ▲     │                     │
           └─ pending ◀────────────────┘  (reopening clears the clock)
 ```
+
+**Both ends of the lifecycle are the system's to assign**, so they mean
+something you can trust:
+
+- `new` says "untouched". That stops being true the moment you pick the ticket
+  up, so **there is no way back to it** — reopening something goes to
+  `in-progress` or `pending`. `POST /submit` is the only thing that writes it
+  (plus the legacy migration in the sweep).
+- `closed` is only ever reached by the 7-day auto-close.
+
+The Worker rejects either one in a `PATCH`, and the dashboard shows a ticket's
+current status but never offers those two as a choice — they appear greyed out
+as the selected value.
 
 **The `open` view = anything that isn't `resolved` or `closed`** — i.e. `new` +
 `in-progress` + `pending`. It's what the dashboard lands on, and it's the
@@ -266,9 +279,9 @@ curl -X PATCH https://benjuicey-feedback.benjuicemcjuice.workers.dev/admin/submi
   -d '{"status":"in-progress","notes":"triaged: real bug, assigned to next sprint"}'
 ```
 
-`status` accepts only `new`, `in-progress`, `pending`, `resolved`. Anything else
-— including `closed` and the retired `open` / `done` / `wont-fix` — gets a 400
-with an explanation. Setting `resolved` returns the `resolvedAt` it stamped, so
+`status` accepts only `in-progress`, `pending`, `resolved`. Anything else — the
+system-assigned `new` and `closed`, or the retired `open` / `done` / `wont-fix`
+— gets a 400 with an explanation. Setting `resolved` returns the `resolvedAt` it stamped, so
 a caller can work out the auto-close date without a second request.
 
 **Resolving must include a closure code** in the same request, or it's a 400:

@@ -452,3 +452,32 @@ redeploy, and the dashboard can set them — both now noted.
   steps work against the committed lockfile.
 - Not yet run for real: it can't be, until `CLOUDFLARE_API_TOKEN` exists. First
   dispatch is the real test.
+
+---
+
+## 2026-07-25 (session 5) — `new` is an arrival state, not a destination
+
+`new` was hand-settable, which made it a lie: it's supposed to mean "nobody has
+looked at this yet", and that stops being true the moment you touch the ticket.
+It's now system-assigned, exactly like `closed` at the other end.
+
+- `SETTABLE_STATUSES` is down to `in-progress` / `pending` / `resolved`. Added
+  `SYSTEM_STATUSES = ['new', 'closed']` documenting *why* each end is off-limits.
+- The Worker rejects `{"status":"new"}` with its own message pointing at
+  in-progress/pending, alongside the existing `closed` rejection.
+- The dashboard generalised its `closed`-only special case: any status that
+  isn't settable renders as a greyed-out current value in the select. So a `new`
+  ticket shows "new" but offers only the three moves, and reopening a closed one
+  goes to in-progress/pending/resolved. The bulk bar lost its `new` button.
+- `POST /submit` and the sweep's legacy migration still write `new` directly to
+  Firestore — the restriction is on the human PATCH path only, which is the
+  point. Pinned by a test (`sweep can still produce new`).
+
+### Verified
+- Sweep fixtures now 29 assertions, all pass, including that the migration still
+  produces `new` while `SETTABLE_STATUSES` excludes it.
+- Driven in a browser across all four cases:
+  `new ticket → new (greyed), in-progress, pending, resolved`;
+  `in-progress → in-progress, pending, resolved`;
+  `closed → closed (greyed), in-progress, pending, resolved`;
+  bulk buttons `work in progress, pending`. Zero stray PATCHes.
