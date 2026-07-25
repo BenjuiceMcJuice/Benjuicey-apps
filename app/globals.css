@@ -409,17 +409,10 @@
     gap: 10px;
   }
 
-  .admin-stats {
-    display: grid;
-    /* One tile per status bucket (total, open, new, work in progress,
-       pending, resolved) — auto-fit so they sit on one row when there's
-       room and wrap instead of squashing when there isn't. */
-    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
-    gap: 16px;
-  }
+  /* The stat tiles that used to live here are gone — the counts ride on the
+     view buttons instead, which halves the chrome above the table. */
 
-  /* Portrait phones: stack the header and drop stats to a 2×2 grid so the
-     cards stop squashing (e.g. "in progress" no longer wraps mid-word). */
+  /* Portrait phones: stack the header so the buttons sit side by side. */
   @media (max-width: 640px) {
     .admin-header {
       flex-direction: column;
@@ -431,10 +424,6 @@
 
     .admin-header-actions > button {
       flex: 1;
-    }
-
-    .admin-stats {
-      grid-template-columns: repeat(2, 1fr);
     }
   }
 }

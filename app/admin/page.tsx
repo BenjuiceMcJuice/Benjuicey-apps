@@ -7,7 +7,6 @@ import {
   CLOSURE_CODE_LABELS,
   CLOSURE_NOTE_MAX,
   ClosureCode,
-  OPEN_STATUSES,
   SELECTABLE_CLOSURE_CODES,
   SETTABLE_STATUSES,
   STATUSES,
@@ -475,22 +474,16 @@ export default function Admin() {
     })
   }
 
-  // Tiles double as view switches. "open" is the aggregate (new + work in
-  // progress + pending); `closed` has no tile — it lives behind its view.
-  const count = (s: Status) => submissions.filter(sub => sub.status === s).length
-  const stats: { label: string; value: number; color: string; view: View }[] = [
-    { label: 'total', value: submissions.length, color: 'var(--color-dark)', view: 'all' },
-    {
-      label: 'open',
-      value: submissions.filter(s => isOpenStatus(s.status)).length,
-      color: 'var(--color-dark)',
-      view: 'open',
-    },
-    ...OPEN_STATUSES.map(s => ({
-      label: STATUS_LABELS[s], value: count(s), color: STATUS_COLORS[s], view: s as View,
-    })),
-    { label: 'resolved', value: count('resolved'), color: STATUS_COLORS.resolved, view: 'resolved' },
-  ]
+  // Counts live on the view buttons rather than in a separate stat panel —
+  // the two were doing the same job, and six tiles pushed the table off a
+  // phone screen. `all` is the total; `open` is the aggregate.
+  const viewCount = (v: View): number =>
+    v === 'all' ? submissions.length
+      : v === 'open' ? submissions.filter(s => isOpenStatus(s.status)).length
+        : submissions.filter(s => s.status === v).length
+
+  const viewColor = (v: View): string =>
+    v === 'all' || v === 'open' ? 'var(--color-dark)' : STATUS_COLORS[v]
 
   const appCount = new Set(submissions.map(s => s.appId)).size
 
@@ -546,45 +539,41 @@ export default function Admin() {
         </div>
       </div>
 
-      {/* Stats — each tile is also a shortcut to that view */}
-      <div className="admin-stats">
-        {stats.map(s => (
-          <button
-            key={s.label}
-            onClick={() => setView(s.view)}
-            className="pixel-box"
-            title={`show ${s.label}`}
-            style={{
-              padding: '16px 20px', textAlign: 'center', cursor: 'pointer',
-              outline: view === s.view ? '3px solid var(--color-dark)' : 'none',
-              outlineOffset: 2,
-            }}
-          >
-            <div className="pixel-font" style={{ fontSize: 22, color: s.color, marginBottom: 8 }}>{s.value}</div>
-            <div className="retro-font" style={{ fontSize: 18, color: 'var(--color-muted)' }}>{s.label}</div>
-          </button>
-        ))}
-      </div>
-
-      {/* Toolbar: views + filter meta */}
+      {/* Toolbar: views (with their counts) + filter meta */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            {VIEWS.map(v => (
-              <button
-                key={v.v}
-                onClick={() => setView(v.v)}
-                className="retro-font"
-                title={v.v === 'open' ? 'everything not resolved or closed' : `status: ${v.label}`}
-                style={{
-                  padding: '6px 14px', border: '3px solid var(--color-dark)', fontSize: 18, cursor: 'pointer',
-                  background: view === v.v ? 'var(--color-dark)' : 'var(--color-bg)',
-                  color: view === v.v ? 'var(--color-card)' : 'var(--color-dark)',
-                }}
-              >
-                {v.label}
-              </button>
-            ))}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            {VIEWS.map(v => {
+              const active = view === v.v
+              return (
+                <button
+                  key={v.v}
+                  onClick={() => setView(v.v)}
+                  className="retro-font"
+                  title={v.v === 'open' ? 'everything not resolved or closed' : `status: ${v.label}`}
+                  style={{
+                    display: 'flex', alignItems: 'baseline', gap: 6,
+                    padding: '4px 10px', border: '2px solid var(--color-dark)',
+                    fontSize: 17, cursor: 'pointer',
+                    background: active ? 'var(--color-dark)' : 'var(--color-bg)',
+                    color: active ? 'var(--color-card)' : 'var(--color-dark)',
+                  }}
+                >
+                  {v.label}
+                  {/* The count in the status colour, so the row reads as a
+                      dashboard as well as a set of switches. */}
+                  <span
+                    className="pixel-font"
+                    style={{
+                      fontSize: 11,
+                      color: active ? 'var(--color-card)' : viewColor(v.v),
+                    }}
+                  >
+                    {viewCount(v.v)}
+                  </span>
+                </button>
+              )
+            })}
           </div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <span className="retro-font" style={{ fontSize: 17, color: 'var(--color-muted)' }}>
