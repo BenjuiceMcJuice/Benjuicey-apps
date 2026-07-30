@@ -426,4 +426,209 @@
       flex: 1;
     }
   }
+
+  /* ─── ticket sheet ─── */
+  /* The per-ticket form used to expand inline *inside* the table's horizontal
+     scroller, so on a phone it laid out at the grid's 1040px min-width and
+     everything past the fold was clipped. It's now an overlay that sits
+     outside that scroller and is sized by the viewport instead: a centred
+     dialog on a desktop, a full-screen sheet on a phone. */
+  .sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(44, 44, 58, 0.55);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .ticket-sheet {
+    width: 100%;
+    max-width: 620px;
+    /* dvh keeps the sheet clear of Safari's collapsing toolbars. */
+    max-height: calc(100vh - 48px);
+    max-height: calc(100dvh - 48px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 4px solid var(--color-dark);
+    box-shadow: 6px 6px 0 var(--color-dark);
+    background: var(--color-card);
+  }
+
+  .ticket-sheet-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding: 12px 14px;
+    background: var(--color-dark);
+    color: var(--color-card);
+  }
+
+  .ticket-sheet-ref {
+    font-size: 10px;
+    line-height: 1.6;
+  }
+
+  .ticket-sheet-status {
+    font-size: 15px;
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ticket-sheet-close {
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 5px 12px;
+    font-size: 17px;
+    line-height: 1.2;
+    color: var(--color-card);
+    background: transparent;
+    border: 2px solid var(--color-card);
+    cursor: pointer;
+  }
+
+  .ticket-sheet-body {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 16px 16px calc(18px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .ticket-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .ticket-section + .ticket-section {
+    padding-top: 16px;
+    border-top: 3px solid rgba(44, 44, 58, 0.18);
+  }
+
+  .ticket-section-title {
+    font-size: 8px;
+    line-height: 1.8;
+    color: var(--color-dark);
+  }
+
+  /* Two columns of facts on a phone, more as the sheet widens. */
+  .ticket-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px 16px;
+  }
+
+  .ticket-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .ticket-label {
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    color: var(--color-muted);
+  }
+
+  .ticket-value {
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--color-dark);
+    overflow-wrap: anywhere;
+  }
+
+  .ticket-message {
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--color-dark);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: 10px 12px;
+    background: var(--color-bg);
+    border: 2px solid rgba(44, 44, 58, 0.25);
+  }
+
+  .ticket-hint {
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--color-muted);
+  }
+
+  /* Character count on the left, buttons trailing right. */
+  .ticket-action-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .ticket-action-row > .ticket-hint:first-child {
+    margin-right: auto;
+  }
+
+  .ticket-btn {
+    padding: 9px 14px;
+    font-size: 16px;
+    color: var(--color-dark);
+    background: var(--color-bg);
+    border: 3px solid var(--color-dark);
+    cursor: pointer;
+  }
+
+  /* Controls are dialled down from the page defaults — but 16px is the floor,
+     because iOS Safari zooms the whole page in on any field below it. */
+  .ticket-sheet .form-input,
+  .ticket-sheet .form-select,
+  .ticket-sheet .form-textarea {
+    font-size: 16px;
+    padding: 9px 11px;
+    border-width: 2px;
+  }
+
+  .ticket-sheet .form-textarea {
+    min-height: 74px;
+  }
+
+  /* Full-width on a phone so they're an easy tap target; reined in once
+     there's room, because a 600px-wide dropdown reads as a mistake. */
+  @media (min-width: 561px) {
+    .ticket-sheet .form-select {
+      max-width: 320px;
+    }
+  }
+
+  .ticket-sheet .form-submit {
+    padding: 11px 16px;
+    box-shadow: 3px 3px 0 rgba(44, 44, 58, 0.4);
+  }
+
+  /* Phones: edge to edge, no wasted margin. */
+  @media (max-width: 560px) {
+    .sheet-backdrop {
+      padding: 0;
+      align-items: stretch;
+    }
+
+    .ticket-sheet {
+      max-width: none;
+      height: 100vh;
+      height: 100dvh;
+      max-height: none;
+      border-left: none;
+      border-right: none;
+      box-shadow: none;
+    }
+  }
 }

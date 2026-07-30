@@ -481,3 +481,46 @@ It's now system-assigned, exactly like `closed` at the other end.
   `in-progress → in-progress, pending, resolved`;
   `closed → closed (greyed), in-progress, pending, resolved`;
   bulk buttons `work in progress, pending`. Zero stray PATCHes.
+
+---
+
+## 2026-07-30 (session 6) — the ticket form is a sheet, not a row
+
+On a phone the per-ticket form was unusable: half of every field ran off the
+right-hand edge. The cause wasn't the form's layout, it was where it lived —
+it expanded *inside* the fault table's `overflow-x: auto` container, so it
+inherited the grid's 1040px `min-width` and laid out at 1040px on a 390px
+screen. Nothing inside it could wrap, because as far as the browser was
+concerned there was plenty of room.
+
+- Detail moved out of the scroller into a `TicketSheet` overlay rendered after
+  the table: full-screen sheet under 560px, centred 620px dialog above it. It's
+  sized by the viewport now, so it fits by construction rather than by luck.
+- Fields reordered into the order you actually read a ticket, in three
+  sections: **THE REPORT** (app, type, from, email, logged, message — nothing
+  editable), **TRIAGE** (status → closure code → closure note), **INTERNAL
+  NOTES**. `REF` moved into the sheet head with the status and the auto-close
+  countdown, so it's still on screen once the body scrolls.
+- Text scaled down for the small screen: labels 12px, values/message 16px,
+  hints 14px, against the 18–20px the inline panel used. **16px is the floor
+  for anything focusable** — iOS Safari zooms the whole page in on a field
+  below it, which is its own kind of broken.
+- Both note fields are textareas with a `n/500` counter instead of one-line
+  inputs (a 500-char cap in a single-line box was a bad joke on a phone). The
+  Enter-to-save shortcut goes with them; the SAVE button is right there.
+- Sheet behaviour: escape or backdrop-tap closes, body scroll locks while it's
+  up, `100dvh` + `env(safe-area-inset-bottom)` keep it clear of Safari's
+  toolbar and the home indicator, and choosing "resolved" scrolls the armed
+  closure controls into view rather than leaving them below the fold.
+- The sheet reads its ticket from `submissions`, not `filtered`, so resolving
+  from the `open` view doesn't yank it shut mid-edit.
+- Email is a `mailto:` with `Re: <ref>` pre-filled — one tap to reply.
+- Table rows are unchanged apart from the trailing `▼` becoming a `›`; the
+  table still scrolls horizontally, which is fine now that nothing you need to
+  *do* lives inside it.
+
+### Verified
+Driven in headless Chromium at iPhone 13 (390px) and 1280px. Sheet width ==
+viewport width, `scrollWidth == clientWidth` on the body (no horizontal
+overflow anywhere), no console errors, escape closes, and the full resolve flow
+— status, code, note, cancel/RESOLVE — fits one phone screen at once.

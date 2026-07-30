@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   AUTO_CLOSE_DAYS,
   CLOSURE_CODE_HINTS,
@@ -156,6 +156,299 @@ const EMPTY_FILTERS: Filters = {
   closureCode: '',
 }
 
+// ─── ticket sheet ────────────────────────────────────────────────────
+// The per-ticket form. It deliberately lives *outside* the table's
+// horizontally-scrolling container: as an inline expanded row it inherited
+// the grid's 1040px min-width, so on a phone every field past ~390px was
+// simply off-screen. As an overlay it's sized by the viewport instead.
+//
+// The fields run in the order you actually read a ticket: what came in
+// (immutable), then what you're doing about it, then your own notes.
+
+interface TicketSheetProps {
+  sub: Submission
+  now: number
+  saving: boolean
+  /** `undefined` = not mid-resolve; `code: ''` = armed, none picked yet. */
+  pending: { code: ClosureCode | ''; note: string } | undefined
+  notes: string
+  closureNote: string
+  onClose: () => void
+  onStatusChange: (status: Status) => void
+  onArmResolve: () => void
+  onPendingChange: (pending: { code: ClosureCode | ''; note: string }) => void
+  onConfirmResolve: () => void
+  onCancelResolve: () => void
+  onClosureCodeChange: (code: ClosureCode) => void
+  onClosureNoteChange: (note: string) => void
+  onSaveClosureNote: () => void
+  onNotesChange: (notes: string) => void
+  onSaveNotes: () => void
+}
+
+function TicketSheet({
+  sub, now, saving, pending, notes, closureNote,
+  onClose, onStatusChange, onArmResolve, onPendingChange, onConfirmResolve,
+  onCancelResolve, onClosureCodeChange, onClosureNoteChange, onSaveClosureNote,
+  onNotesChange, onSaveNotes,
+}: TicketSheetProps) {
+  const resolving = pending !== undefined
+  const carriesClosure = takesClosureCode(sub.status)
+  const daysLeft = sub.status === 'resolved' ? daysUntilAutoClose(sub.resolvedAt, now) : null
+
+  // Choosing "resolved" reveals the closure controls further down the sheet;
+  // on a phone they land below the fold, so bring them to you.
+  const resolveBlock = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (resolving) resolveBlock.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [resolving])
+
+  return (
+    // Clicking the backdrop closes; clicks inside the sheet are stopped below.
+    <div
+      className="sheet-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`ticket ${sub.ref}`}
+      onClick={onClose}
+    >
+      <div className="ticket-sheet" onClick={e => e.stopPropagation()}>
+        {/* Head: identity + where it sits, pinned while the body scrolls. */}
+        <div className="ticket-sheet-head">
+          <span className="pixel-font ticket-sheet-ref">{sub.ref}</span>
+          <span
+            className="retro-font ticket-sheet-status"
+            style={{ color: statusColor(sub.status) }}
+          >
+            {statusLabel(sub.status)}
+            {daysLeft !== null && (
+              <span style={{ opacity: 0.7 }}> ·{daysLeft}d</span>
+            )}
+          </span>
+          <button
+            className="retro-font ticket-sheet-close"
+            onClick={onClose}
+            title="close (esc)"
+            aria-label="close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="ticket-sheet-body">
+          {/* 1 — what came in. Nothing here is editable. */}
+          <div className="ticket-section">
+            <div className="pixel-font ticket-section-title">THE REPORT</div>
+            <div className="ticket-grid">
+              <div className="ticket-field">
+                <span className="retro-font ticket-label">APP</span>
+                <span className="retro-font ticket-value">{sub.appId} ({sub.trigram})</span>
+              </div>
+              <div className="ticket-field">
+                <span className="retro-font ticket-label">TYPE</span>
+                <span className="retro-font ticket-value">{sub.type}</span>
+              </div>
+              <div className="ticket-field">
+                <span className="retro-font ticket-label">FROM</span>
+                <span className="retro-font ticket-value">{sub.name || '—'}</span>
+              </div>
+              <div className="ticket-field">
+                <span className="retro-font ticket-label">EMAIL</span>
+                <span className="retro-font ticket-value">
+                  {sub.email
+                    ? (
+                      // One tap to reply on a phone, with the ref pre-filled.
+                      <a
+                        href={`mailto:${sub.email}?subject=${encodeURIComponent(`Re: ${sub.ref}`)}`}
+                        style={{ textDecoration: 'underline' }}
+                      >
+                        {sub.email}
+                      </a>
+                    )
+                    : 'not given'}
+                </span>
+              </div>
+              <div className="ticket-field">
+                <span className="retro-font ticket-label">LOGGED</span>
+                <span className="retro-font ticket-value">
+                  {new Date(sub.timestamp).toLocaleString('en-GB')}
+                </span>
+              </div>
+            </div>
+            <div className="ticket-field">
+              <span className="retro-font ticket-label">MESSAGE</span>
+              <div className="retro-font ticket-message">{sub.message}</div>
+            </div>
+          </div>
+
+          {/* 2 — what's being done about it. */}
+          <div className="ticket-section">
+            <div className="pixel-font ticket-section-title">TRIAGE</div>
+            <div className="ticket-field">
+              <span className="retro-font ticket-label">STATUS</span>
+              <select
+                className="form-select"
+                value={resolving ? 'resolved' : sub.status}
+                onChange={e => {
+                  const next = e.target.value as Status
+                  // Resolving doesn't save yet: it arms the closure code
+                  // picker below, and the two go to the Worker together.
+                  if (next === 'resolved') onArmResolve()
+                  else onStatusChange(next)
+                }}
+              >
+                {/* The system-assigned ends of the lifecycle (`new` on
+                    arrival, `closed` by the sweep) appear only as the current
+                    value, greyed out — picking anything else moves the ticket
+                    on, or reopens it. */}
+                {!SETTABLE_STATUSES.includes(sub.status) && (
+                  <option value={sub.status} disabled>{STATUS_LABELS[sub.status]}</option>
+                )}
+                {SETTABLE_STATUSES.map(s => (
+                  <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+                ))}
+              </select>
+              {!resolving && autoCloseNote(sub, now) && (
+                <span className="retro-font ticket-hint">{autoCloseNote(sub, now)}</span>
+              )}
+              {!resolving && !carriesClosure && (
+                <span className="retro-font ticket-hint">
+                  resolve it to start the {AUTO_CLOSE_DAYS}-day close countdown
+                </span>
+              )}
+            </div>
+
+            {/* Closure code + note — armed by choosing "resolved" above, and
+                each editable on its own afterwards so a wrong code or a thin
+                note can be corrected without restarting the countdown. */}
+            {resolving ? (
+              <>
+                <div className="ticket-field" ref={resolveBlock}>
+                  <span className="retro-font ticket-label">CLOSURE CODE — REQUIRED</span>
+                  <select
+                    className="form-select"
+                    value={pending.code}
+                    autoFocus
+                    onChange={e => onPendingChange({ ...pending, code: e.target.value as ClosureCode })}
+                  >
+                    <option value="">— why? —</option>
+                    {SELECTABLE_CLOSURE_CODES.map(c => (
+                      <option key={c} value={c}>{CLOSURE_CODE_LABELS[c]}</option>
+                    ))}
+                  </select>
+                  <span className="retro-font ticket-hint">
+                    {pending.code
+                      ? CLOSURE_CODE_HINTS[pending.code]
+                      : 'pick why this is done — it stays on the ticket'}
+                  </span>
+                </div>
+                <div className="ticket-field">
+                  <span className="retro-font ticket-label">CLOSURE NOTE (OPTIONAL)</span>
+                  <textarea
+                    className="form-textarea"
+                    value={pending.note}
+                    maxLength={CLOSURE_NOTE_MAX}
+                    placeholder="what actually happened..."
+                    onChange={e => onPendingChange({ ...pending, note: e.target.value })}
+                  />
+                  <div className="ticket-action-row">
+                    <span className="retro-font ticket-hint">
+                      {pending.note.length}/{CLOSURE_NOTE_MAX}
+                    </span>
+                    <button className="retro-font ticket-btn" onClick={onCancelResolve}>
+                      cancel
+                    </button>
+                    <button
+                      className="form-submit"
+                      disabled={!pending.code || saving}
+                      onClick={onConfirmResolve}
+                      style={{ opacity: pending.code ? 1 : 0.4 }}
+                    >
+                      {saving ? '...' : 'RESOLVE →'}
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="ticket-field">
+                  <span className="retro-font ticket-label">CLOSURE CODE</span>
+                  <select
+                    className="form-select"
+                    value={sub.closureCode ?? ''}
+                    disabled={!carriesClosure || saving}
+                    onChange={e => onClosureCodeChange(e.target.value as ClosureCode)}
+                    style={{ opacity: carriesClosure ? 1 : 0.5 }}
+                  >
+                    <option value="" disabled>—</option>
+                    {SELECTABLE_CLOSURE_CODES.map(c => (
+                      <option key={c} value={c}>{CLOSURE_CODE_LABELS[c]}</option>
+                    ))}
+                    {/* Backfilled on tickets resolved before codes existed. */}
+                    {sub.closureCode === 'unspecified' && (
+                      <option value="unspecified">{CLOSURE_CODE_LABELS.unspecified}</option>
+                    )}
+                  </select>
+                  <span className="retro-font ticket-hint">
+                    {sub.closureCode
+                      ? CLOSURE_CODE_HINTS[sub.closureCode]
+                      : 'set when you resolve the ticket'}
+                  </span>
+                </div>
+                <div className="ticket-field">
+                  <span className="retro-font ticket-label">CLOSURE NOTE</span>
+                  <textarea
+                    className="form-textarea"
+                    value={closureNote}
+                    maxLength={CLOSURE_NOTE_MAX}
+                    disabled={!carriesClosure}
+                    onChange={e => onClosureNoteChange(e.target.value)}
+                    placeholder={carriesClosure
+                      ? 'what actually happened...'
+                      : 'written when you resolve it'}
+                    style={{ opacity: carriesClosure ? 1 : 0.5 }}
+                  />
+                  <div className="ticket-action-row">
+                    <span className="retro-font ticket-hint">
+                      {closureNote.length}/{CLOSURE_NOTE_MAX}
+                    </span>
+                    <button
+                      className="form-submit"
+                      onClick={onSaveClosureNote}
+                      disabled={!carriesClosure || saving}
+                    >
+                      {saving ? '...' : 'SAVE'}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 3 — your own working notes, last because they're private. */}
+          <div className="ticket-section">
+            <div className="pixel-font ticket-section-title">INTERNAL NOTES</div>
+            <div className="ticket-field">
+              <textarea
+                className="form-textarea"
+                value={notes}
+                onChange={e => onNotesChange(e.target.value)}
+                placeholder="notes visible only to you..."
+              />
+              <div className="ticket-action-row">
+                <span className="retro-font ticket-hint">never leaves the console</span>
+                <button className="form-submit" onClick={onSaveNotes} disabled={saving}>
+                  {saving ? '...' : 'SAVE'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Admin() {
   const [password, setPassword] = useState('')
   const [authed, setAuthed] = useState(false)
@@ -169,7 +462,8 @@ export default function Admin() {
   const [now, setNow] = useState(() => Date.now())
   const [sortKey, setSortKey] = useState<ColKey>('timestamp')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const [expanded, setExpanded] = useState<string | null>(null)
+  // The ticket whose detail sheet is up, by ref — `null` when none is.
+  const [openRef, setOpenRef] = useState<string | null>(null)
   const [editNotes, setEditNotes] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
   // Refs the user has ticked for bulk actions.
@@ -225,6 +519,21 @@ export default function Admin() {
     const saved = sessionStorage.getItem('admin-pw')
     if (saved) { setAuthed(true); fetchSubmissions(saved) }
   }, [fetchSubmissions])
+
+  // While the sheet is up: escape closes it, and the page behind it stops
+  // scrolling — otherwise a touch drag that misses the sheet scrolls the
+  // table underneath and you lose your place.
+  useEffect(() => {
+    if (!openRef) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenRef(null) }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = previous
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [openRef])
 
   function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -452,6 +761,8 @@ export default function Admin() {
       return String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? '')) * dir
     })
   }, [submissions, view, filters, sortKey, sortDir])
+
+  const openSub = openRef ? submissions.find(s => s.ref === openRef) ?? null : null
 
   const allVisibleSelected = filtered.length > 0 && filtered.every(s => selected.has(s.ref))
   const someVisibleSelected = filtered.some(s => selected.has(s.ref))
@@ -751,17 +1062,15 @@ export default function Admin() {
             </p>
           )}
           {filtered.map((sub, i) => {
-            const isOpen = expanded === sub.ref
-            // `undefined` = not mid-resolve; code '' = resolving, none chosen yet.
-            const pending = pendingResolve[sub.ref]
+            const isOpen = openRef === sub.ref
             return (
               <div
                 key={sub.ref}
                 style={{ borderBottom: '2px solid rgba(44,44,58,0.18)' }}
               >
-                {/* Summary row */}
+                {/* Summary row — tapping it opens the detail sheet. */}
                 <div
-                  onClick={() => setExpanded(isOpen ? null : sub.ref)}
+                  onClick={() => setOpenRef(isOpen ? null : sub.ref)}
                   style={{
                     display: 'grid', gridTemplateColumns: GRID_TEMPLATE, alignItems: 'center',
                     cursor: 'pointer',
@@ -829,254 +1138,55 @@ export default function Admin() {
                   >
                     {closureCodeLabel(sub.closureCode) || '—'}
                   </span>
-                  <span style={{ padding: '11px 8px', color: 'var(--color-muted)', textAlign: 'center' }}>
-                    {isOpen ? '▲' : '▼'}
+                  <span
+                    className="retro-font"
+                    title="open ticket"
+                    style={{
+                      padding: '11px 8px', fontSize: 20, textAlign: 'center',
+                      color: isOpen ? 'var(--color-dark)' : 'var(--color-muted)',
+                    }}
+                  >
+                    ›
                   </span>
                 </div>
-
-                {/* Expanded detail */}
-                {isOpen && (
-                  <div style={{ borderTop: '3px solid var(--color-dark)', padding: '20px', display: 'flex', flexDirection: 'column', gap: 18, background: 'var(--color-card)' }}>
-                    <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
-                      <div>
-                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>REF</div>
-                        <div className="retro-font" style={{ fontSize: 18, fontWeight: 'bold' }}>{sub.ref}</div>
-                      </div>
-                      <div>
-                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>APP</div>
-                        <div className="retro-font" style={{ fontSize: 18 }}>{sub.appId} ({sub.trigram})</div>
-                      </div>
-                      <div>
-                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>TYPE</div>
-                        <div className="retro-font" style={{ fontSize: 18 }}>{sub.type}</div>
-                      </div>
-                      <div>
-                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>LOGGED</div>
-                        <div className="retro-font" style={{ fontSize: 18 }}>{new Date(sub.timestamp).toLocaleString('en-GB')}</div>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>FROM</div>
-                      <div className="retro-font" style={{ fontSize: 20 }}>
-                        {sub.name}{sub.email ? ` — ${sub.email}` : ' (no email)'}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 4 }}>MESSAGE</div>
-                      <div className="retro-font" style={{ fontSize: 20, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{sub.message}</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                      <div>
-                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>STATUS</div>
-                        <select
-                          className="form-select"
-                          value={pending !== undefined ? 'resolved' : sub.status}
-                          onChange={e => {
-                            const next = e.target.value as Status
-                            // Resolving doesn't save yet: it arms the closure
-                            // code picker beside this select, and the two go
-                            // to the Worker together.
-                            if (next === 'resolved') {
-                              setPendingResolve(p => ({
-                                ...p,
-                                [sub.ref]: { code: sub.closureCode ?? '', note: sub.closureNote ?? '' },
-                              }))
-                              return
-                            }
-                            clearPendingResolve(sub.ref)
-                            updateStatus(sub.ref, next)
-                          }}
-                          style={{ width: 'auto' }}
-                        >
-                          {/* The system-assigned ends of the lifecycle (`new`
-                              on arrival, `closed` by the sweep) appear only as
-                              the current value, greyed out — picking anything
-                              else moves the ticket on, or reopens it. */}
-                          {!SETTABLE_STATUSES.includes(sub.status) && (
-                            <option value={sub.status} disabled>{STATUS_LABELS[sub.status]}</option>
-                          )}
-                          {SETTABLE_STATUSES.map(s => (
-                            <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-                          ))}
-                        </select>
-                        {autoCloseNote(sub, now) && pending === undefined && (
-                          <div
-                            className="retro-font"
-                            style={{ fontSize: 15, color: 'var(--color-muted)', marginTop: 8, maxWidth: 280 }}
-                          >
-                            {autoCloseNote(sub, now)}
-                          </div>
-                        )}
-                        {!takesClosureCode(sub.status) && pending === undefined && (
-                          <div
-                            className="retro-font"
-                            style={{ fontSize: 15, color: 'var(--color-muted)', marginTop: 8, maxWidth: 280 }}
-                          >
-                            resolve it to start the {AUTO_CLOSE_DAYS}-day close countdown
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Closure code + note — armed by choosing "resolved"
-                          above, and each editable on its own afterwards so a
-                          wrong code or a thin note can be corrected without
-                          restarting the close countdown. */}
-                      {pending !== undefined ? (
-                        <div style={{ flex: 1, minWidth: 260 }}>
-                          <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>
-                            CLOSURE CODE + NOTE
-                          </div>
-                          <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', flexWrap: 'wrap' }}>
-                            <select
-                              className="form-select"
-                              value={pending.code}
-                              autoFocus
-                              onChange={e => setPendingResolve(p => ({
-                                ...p, [sub.ref]: { ...pending, code: e.target.value as ClosureCode },
-                              }))}
-                              style={{ width: 'auto' }}
-                            >
-                              <option value="">— why? —</option>
-                              {SELECTABLE_CLOSURE_CODES.map(c => (
-                                <option key={c} value={c}>{CLOSURE_CODE_LABELS[c]}</option>
-                              ))}
-                            </select>
-                            <input
-                              className="form-input"
-                              value={pending.note}
-                              maxLength={CLOSURE_NOTE_MAX}
-                              placeholder="note (optional) — what actually happened..."
-                              onChange={e => setPendingResolve(p => ({
-                                ...p, [sub.ref]: { ...pending, note: e.target.value },
-                              }))}
-                              onKeyDown={e => { if (e.key === 'Enter' && pending.code) confirmResolve(sub.ref) }}
-                              style={{ flex: 1, minWidth: 180 }}
-                            />
-                            <button
-                              className="form-submit"
-                              disabled={!pending.code || saving === sub.ref}
-                              onClick={() => confirmResolve(sub.ref)}
-                              style={{ padding: '10px 18px', opacity: pending.code ? 1 : 0.4 }}
-                            >
-                              {saving === sub.ref ? '...' : 'RESOLVE →'}
-                            </button>
-                            <button
-                              className="retro-font"
-                              onClick={() => clearPendingResolve(sub.ref)}
-                              style={{
-                                padding: '10px 14px', border: '3px solid var(--color-dark)',
-                                background: 'var(--color-bg)', fontSize: 17, cursor: 'pointer',
-                              }}
-                            >
-                              cancel
-                            </button>
-                          </div>
-                          <div
-                            className="retro-font"
-                            style={{ fontSize: 15, color: 'var(--color-muted)', marginTop: 8 }}
-                          >
-                            {pending.code
-                              ? CLOSURE_CODE_HINTS[pending.code]
-                              : 'pick why this is done — it stays on the ticket'}
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <div>
-                            <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>
-                              CLOSURE CODE
-                            </div>
-                            <select
-                              className="form-select"
-                              value={sub.closureCode ?? ''}
-                              disabled={!takesClosureCode(sub.status) || saving === sub.ref}
-                              onChange={e => updateClosureCode(sub.ref, e.target.value as ClosureCode)}
-                              style={{ width: 'auto', opacity: takesClosureCode(sub.status) ? 1 : 0.5 }}
-                            >
-                              <option value="" disabled>—</option>
-                              {SELECTABLE_CLOSURE_CODES.map(c => (
-                                <option key={c} value={c}>{CLOSURE_CODE_LABELS[c]}</option>
-                              ))}
-                              {/* Backfilled on tickets resolved before codes existed. */}
-                              {sub.closureCode === 'unspecified' && (
-                                <option value="unspecified">{CLOSURE_CODE_LABELS.unspecified}</option>
-                              )}
-                            </select>
-                            <div
-                              className="retro-font"
-                              style={{ fontSize: 15, color: 'var(--color-muted)', marginTop: 8, maxWidth: 280 }}
-                            >
-                              {sub.closureCode
-                                ? CLOSURE_CODE_HINTS[sub.closureCode]
-                                : 'set when you resolve the ticket'}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Notes row — closure note (the public-ish "what
-                        happened") and private internal notes, side by side so
-                        both have room to be read. */}
-                    <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                      {/* Hidden mid-resolve: the note lives in the armed block above. */}
-                      {pending === undefined && (
-                        <div style={{ flex: 1, minWidth: 240 }}>
-                          <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>
-                            CLOSURE NOTE
-                          </div>
-                          <div style={{ display: 'flex', gap: 10 }}>
-                            <input
-                              className="form-input"
-                              value={editClosureNote[sub.ref] ?? ''}
-                              maxLength={CLOSURE_NOTE_MAX}
-                              disabled={!takesClosureCode(sub.status)}
-                              onChange={e => setEditClosureNote(n => ({ ...n, [sub.ref]: e.target.value }))}
-                              onKeyDown={e => { if (e.key === 'Enter') saveClosureNote(sub.ref) }}
-                              placeholder={takesClosureCode(sub.status)
-                                ? 'what actually happened...'
-                                : 'written when you resolve it'}
-                              style={{ flex: 1, opacity: takesClosureCode(sub.status) ? 1 : 0.5 }}
-                            />
-                            <button
-                              className="form-submit"
-                              onClick={() => saveClosureNote(sub.ref)}
-                              disabled={!takesClosureCode(sub.status) || saving === sub.ref}
-                              style={{ padding: '10px 18px', alignSelf: 'stretch' }}
-                            >
-                              {saving === sub.ref ? '...' : 'SAVE'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      <div style={{ flex: 1, minWidth: 240 }}>
-                        <div className="retro-font" style={{ fontSize: 13, color: 'var(--color-muted)', marginBottom: 8 }}>INTERNAL NOTES</div>
-                        <div style={{ display: 'flex', gap: 10 }}>
-                          <input
-                            className="form-input"
-                            value={editNotes[sub.ref] ?? ''}
-                            onChange={e => setEditNotes(n => ({ ...n, [sub.ref]: e.target.value }))}
-                            placeholder="notes visible only to you..."
-                            style={{ flex: 1 }}
-                          />
-                          <button
-                            className="form-submit"
-                            onClick={() => saveNotes(sub.ref)}
-                            disabled={saving === sub.ref}
-                            style={{ padding: '10px 18px', alignSelf: 'stretch' }}
-                          >
-                            {saving === sub.ref ? '...' : 'SAVE'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             )
           })}
         </div>
       </div>
+
+      {/* Ticket detail — rendered here, outside the table's horizontal
+          scroller, so it's sized by the viewport rather than by the grid's
+          min-width. Looked up in `submissions` rather than `filtered` so
+          resolving a ticket from the `open` view doesn't yank the sheet out
+          from under you the moment it stops matching. */}
+      {openSub && (
+        <TicketSheet
+          sub={openSub}
+          now={now}
+          saving={saving === openSub.ref}
+          pending={pendingResolve[openSub.ref]}
+          notes={editNotes[openSub.ref] ?? ''}
+          closureNote={editClosureNote[openSub.ref] ?? ''}
+          onClose={() => setOpenRef(null)}
+          onStatusChange={status => {
+            clearPendingResolve(openSub.ref)
+            updateStatus(openSub.ref, status)
+          }}
+          onArmResolve={() => setPendingResolve(p => ({
+            ...p,
+            [openSub.ref]: { code: openSub.closureCode ?? '', note: openSub.closureNote ?? '' },
+          }))}
+          onPendingChange={pending => setPendingResolve(p => ({ ...p, [openSub.ref]: pending }))}
+          onConfirmResolve={() => confirmResolve(openSub.ref)}
+          onCancelResolve={() => clearPendingResolve(openSub.ref)}
+          onClosureCodeChange={code => updateClosureCode(openSub.ref, code)}
+          onClosureNoteChange={note => setEditClosureNote(n => ({ ...n, [openSub.ref]: note }))}
+          onSaveClosureNote={() => saveClosureNote(openSub.ref)}
+          onNotesChange={notes => setEditNotes(n => ({ ...n, [openSub.ref]: notes }))}
+          onSaveNotes={() => saveNotes(openSub.ref)}
+        />
+      )}
     </main>
   )
 }
