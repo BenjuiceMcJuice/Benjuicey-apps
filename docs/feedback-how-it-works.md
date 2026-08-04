@@ -62,7 +62,8 @@ Each submission is one document at `submissions/{ref}`:
 | `email` | `jane@…` (may be blank) | the user |
 | `message` | free text | the user |
 | `timestamp` | date/time | Worker |
-| `notes` | `` (empty) | you, later, in the admin dashboard |
+| `workNotes` | `[{ at: 2026-08-04T10:02Z, text: "emailed Jane for a screenshot" }, …]` | you, in the dashboard — one entry per update, append-only (see below) |
+| `notes` | `` (empty) | **legacy** — the old single note, now read-only in the dashboard |
 | `closureCode` | `fixed` or null | Worker, when status → `resolved` (required — see below) |
 | `closureNote` | `was a stale localStorage key` or null | you, when resolving (optional free text, ≤500 chars) |
 | `resolvedAt` | date/time or null | Worker, when status → `resolved` (starts the auto-close clock) |
@@ -153,6 +154,41 @@ longer apply.
 This is also where the retired `wont-fix` *status* went: it was never really a
 state, it was a reason. Old `wont-fix` records keep that meaning — the sweep
 migrates them to `closed` with `closureCode: wont-fix`.
+
+### Work notes — the dated journal on a ticket
+
+A closure note says how a ticket *ended*. **Work notes** are what happened
+along the way: a running log where **every update is its own entry, stamped
+with the time you added it**, and nothing already written is edited or
+deleted. Model and helpers live in [`lib/worknotes.ts`](../lib/worknotes.ts),
+shared by the Worker and the dashboard like `lib/status.ts`.
+
+```
+WDA-0007
+  04/08/2026, 16:41   can't reproduce on iOS 18 — asked Jane for her version
+  03/08/2026, 09:12   emailed Jane for a screenshot
+  02/08/2026, 20:05   reproduced on Android; looks like the offline cache
+```
+
+- **Adding one:** open a ticket → **WORK NOTES** → type the update → `ADD
+  UPDATE`. It appears at the top of the list immediately. Entries are shown
+  newest-first and capped at 2,000 characters each (`WORK_NOTE_MAX`).
+- **The timestamp is the Worker's**, not your device's, so entries stay in one
+  order however many phones and laptops you write them from.
+- **There is no edit or delete.** That's the point of a journal — an update
+  that turned out to be wrong is corrected by adding another one. (If you need
+  to erase something, it's a Firestore console job, deliberately.)
+- **Appends are atomic.** The Worker uses Firestore's `appendMissingElements`
+  transform rather than rewriting the list, so two updates written at the same
+  moment can't overwrite each other and no entry is ever lost to a stale copy.
+- **The old `notes` field is still there.** It was one string that each save
+  overwrote — the second update wiped the first, which is what work notes fix.
+  Any existing text shows in the sheet under **EARLIER NOTES**, read-only,
+  with a `clear` button for once you've moved anything worth keeping into an
+  update. Nothing writes to it any more.
+
+Status changes are *not* auto-logged as work notes — the journal is what you
+wrote, and the status fields already record the rest.
 
 ### Auto-close after 7 days
 
@@ -257,7 +293,7 @@ The portfolio site has a private admin page: **`https://benjuicey-apps.pages.dev
 - Stat tiles: total / open / new / work in progress / pending / resolved — each tile is also a shortcut to that view
 - Views: **all**, **open** (the default — everything not resolved or closed), then one per status
 - Wildcard filters and click-to-sort on every column, plus multi-select for bulk status changes
-- Click any item to read the full message, change its **status** and **closure code**, and add private **internal notes**
+- Click any item to read the full message, change its **status** and **closure code**, and add a dated **work note** — each update is kept as its own timestamped entry, newest first (see "Work notes" above)
 - A `resolved` ticket shows how long until it auto-closes (`·4d` in the table, spelled out in the detail panel). `closed` isn't offered as a choice — see the lifecycle above.
 - The **CLOSURE** column shows why each finished ticket ended (`—` while it's still open), so `*won't*` in that column's filter is "everything I decided not to do". Hover a cell for the closure note.
 
@@ -272,12 +308,17 @@ The same data is available over HTTP, password-protected via the `x-admin-passwo
 curl https://benjuicey-feedback.benjuicemcjuice.workers.dev/admin/submissions \
   -H "x-admin-password: YOUR_ADMIN_PASSWORD"
 
-# Update one item's status and/or notes
+# Update one item's status, and log what you did about it
 curl -X PATCH https://benjuicey-feedback.benjuicemcjuice.workers.dev/admin/submissions/WDA-0001 \
   -H "x-admin-password: YOUR_ADMIN_PASSWORD" \
   -H "Content-Type: application/json" \
-  -d '{"status":"in-progress","notes":"triaged: real bug, assigned to next sprint"}'
+  -d '{"status":"in-progress","workNote":"triaged: real bug, assigned to next sprint"}'
 ```
+
+`workNote` **appends** one dated entry to the ticket's journal — it never
+replaces what's there. The Worker stamps the time and echoes the stored entry
+back as `{"workNote":{"at":…,"text":…}}`. Blank text is a 400, and it can be
+sent on its own or alongside a status change in the same request.
 
 `status` accepts only `in-progress`, `pending`, `resolved`. Anything else — the
 system-assigned `new` and `closed`, or the retired `open` / `done` / `wont-fix`
@@ -316,7 +357,7 @@ This is the workflow for "read the newer updates and categorise them" — either
    - suggest a priority (volume + recency + severity)
    - surface anything urgent or from a named partner
    - give a per-app summary
-4. **Optionally write back** — set `status` (e.g. `new` → `in-progress`) and drop a triage tag into `notes` via `PATCH`, so the dashboard reflects the review.
+4. **Optionally write back** — set `status` (e.g. `new` → `in-progress`) and add a dated triage line via `workNote` in the same `PATCH`, so the dashboard shows both the new state and when the review happened.
 
 ### A ready-to-use prompt
 

@@ -9,6 +9,14 @@ function toField(v: unknown): unknown {
   if (typeof v === 'string') return { stringValue: v }
   if (typeof v === 'number') return { integerValue: String(Math.round(v)) }
   if (typeof v === 'boolean') return { booleanValue: v }
+  // Arrays and plain objects — used by `workNotes`, a list of {at, text}
+  // maps. Both recurse, so a map's values get the same treatment.
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toField) } }
+  if (typeof v === 'object' && v !== null) {
+    const fields: Record<string, unknown> = {}
+    for (const [k, val] of Object.entries(v)) fields[k] = toField(val)
+    return { mapValue: { fields } }
+  }
   return { nullValue: null }
 }
 
@@ -23,6 +31,14 @@ function fromField(v: Record<string, unknown>): unknown {
   if ('integerValue' in v) return parseInt(v.integerValue as string)
   if ('booleanValue' in v) return v.booleanValue
   if ('timestampValue' in v) return v.timestampValue
+  // Mirrors the array/map arms of `toField` — without these, `workNotes`
+  // would read back as `null` and every ticket would look like it had no
+  // journal at all.
+  if ('arrayValue' in v) {
+    const values = ((v.arrayValue ?? {}) as { values?: Record<string, unknown>[] }).values ?? []
+    return values.map(fromField)
+  }
+  if ('mapValue' in v) return fromDoc(v.mapValue as Record<string, unknown>)
   return null
 }
 
@@ -109,9 +125,13 @@ export async function listSubmissions(
  * Firestore null, which `fromField` reads back as `null`) — that's how
  * `resolvedAt` / `closedAt` are cleared when a ticket moves back off
  * `resolved` / `closed`.
+ *
+ * `workNotes` is absent on purpose: the journal is append-only and goes
+ * through `appendWorkNote`, never a whole-field overwrite.
  */
 export interface SubmissionUpdate {
   status?: string
+  /** LEGACY single-string note, kept so old text survives — see lib/worknotes.ts. */
   notes?: string
   closureCode?: string | null
   closureNote?: string | null
@@ -139,6 +159,44 @@ export async function updateSubmission(
     body: JSON.stringify({ name: docName(projectId, 'submissions', ref), fields: docFields }),
   })
   if (!res.ok) throw new Error(`Update failed: ${await res.text()}`)
+}
+
+/**
+ * Adds one entry to a ticket's `workNotes` journal.
+ *
+ * This deliberately doesn't read-modify-write the array: it uses Firestore's
+ * `appendMissingElements` transform, so the append happens server-side in one
+ * atomic call. Two updates written at once can't overwrite each other, and no
+ * note can ever be lost to a stale copy of the list. (Set semantics also mean
+ * a double-tapped "add" with the same text *and* the same timestamp lands
+ * once, which is the behaviour you want.)
+ *
+ * `exists: true` stops a typo'd ref from conjuring a document that is nothing
+ * but a work note — Firestore's PATCH would otherwise create one.
+ */
+export async function appendWorkNote(
+  projectId: string,
+  token: string,
+  ref: string,
+  note: { at: Date; text: string },
+): Promise<void> {
+  const res = await fetch(`${BASE}/projects/${projectId}/databases/(default)/documents:commit`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      writes: [{
+        transform: {
+          document: docName(projectId, 'submissions', ref),
+          fieldTransforms: [{
+            fieldPath: 'workNotes',
+            appendMissingElements: { values: [toField({ at: note.at, text: note.text })] },
+          }],
+        },
+        currentDocument: { exists: true },
+      }],
+    }),
+  })
+  if (!res.ok) throw new Error(`Work note append failed: ${await res.text()}`)
 }
 
 /**

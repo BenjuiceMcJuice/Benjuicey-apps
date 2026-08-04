@@ -560,6 +560,42 @@
     border: 2px solid rgba(44, 44, 58, 0.25);
   }
 
+  /* The work-note journal: newest at the top, each entry under its own
+     timestamp. A left rule ties the entries together as one timeline. */
+  .work-note-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    /* Deliberately not its own scroller: a nested scroll area inside a sheet
+       that already scrolls is a trap on touch. A long journal just makes the
+       sheet longer. */
+    padding-left: 10px;
+    border-left: 3px solid rgba(44, 44, 58, 0.25);
+  }
+
+  .work-note {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px 10px;
+    background: var(--color-bg);
+    border: 2px solid rgba(44, 44, 58, 0.2);
+  }
+
+  .work-note-at {
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    color: var(--color-muted);
+  }
+
+  .work-note-text {
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--color-dark);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
   .ticket-hint {
     font-size: 14px;
     line-height: 1.45;

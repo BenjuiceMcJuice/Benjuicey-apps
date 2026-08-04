@@ -524,3 +524,47 @@ Driven in headless Chromium at iPhone 13 (390px) and 1280px. Sheet width ==
 viewport width, `scrollWidth == clientWidth` on the body (no horizontal
 overflow anywhere), no console errors, escape closes, and the full resolve flow
 — status, code, note, cancel/RESOLVE — fits one phone screen at once.
+
+## 2026-08-04 — work notes: a ticket keeps every update, not just the last one
+
+`notes` was one string, and every save overwrote it. Write "emailed Jane for a
+screenshot" on Monday, write "still not reproducible" on Thursday, and Monday
+is gone — so a ticket could never tell you what had actually been done to it,
+only what you last happened to type. Replaced with an **append-only journal**.
+
+- New shared model, `lib/worknotes.ts` — imported by both the Worker and the
+  console, same rule as `lib/status.ts`. A ticket's `workNotes` is a list of
+  `{ at, text }` entries, capped at 2,000 characters each.
+- `PATCH /admin/submissions/:ref` takes `workNote` and **appends** one entry,
+  on its own or alongside a status change. There is no edit and no delete: an
+  update that was wrong is corrected by adding another. The Worker stamps `at`
+  server-side, so entries stay in one order however many devices you write
+  from, and echoes the stored entry back for the UI to render.
+- The append is a Firestore `appendMissingElements` transform, not a
+  read-modify-write of the array — one atomic call, so simultaneous updates
+  can't clobber each other and nothing is lost to a stale copy of the list.
+  Set semantics also make a double-tapped ADD UPDATE land once.
+- `worker/src/firestore.ts` learned arrays and maps in both directions
+  (`toField`/`fromField`); without the read side, `workNotes` came back `null`
+  and every ticket looked like it had no journal.
+- Console: the sheet's **INTERNAL NOTES** box is now **WORK NOTES** — a text
+  area plus `ADD UPDATE`, and the entries beneath it newest-first under their
+  timestamps. Drafts survive closing the sheet and are only cleared once the
+  append lands.
+- The old `notes` field is left alone rather than migrated (its text has no
+  date to sit under). Anything already in it shows as **EARLIER NOTES**,
+  read-only, with a `clear` button for once it's been moved into an update.
+  Nothing writes to it any more.
+
+Status changes are deliberately *not* auto-logged as entries — the journal is
+what you wrote, and `resolvedAt` / `closedAt` / `closureCode` already record
+the rest.
+
+### Verified
+Firestore payloads exercised against a stubbed fetch: an `arrayValue` of
+`mapValue`s reads back as `[{at, text}]`, the append transform emits the
+documented shape with an `exists: true` precondition, and a new submission
+writes `workNotes: []`. UI driven in headless Chromium at iPhone 13 (390px)
+and 1280px — journal renders newest-first, ADD UPDATE appends a dated entry
+and clears the draft, the legacy block clears, `scrollWidth == clientWidth`
+(no horizontal overflow), no console errors.

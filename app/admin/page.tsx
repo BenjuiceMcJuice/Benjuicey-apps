@@ -24,6 +24,13 @@ import {
   statusLabel,
   takesClosureCode,
 } from '@/lib/status'
+import {
+  WORK_NOTE_MAX,
+  WorkNote,
+  formatWorkNoteAt,
+  normaliseWorkNotes,
+  sortWorkNotesNewestFirst,
+} from '@/lib/worknotes'
 
 const API = process.env.NEXT_PUBLIC_FEEDBACK_API_URL!
 
@@ -37,7 +44,10 @@ interface Submission {
   email: string
   message: string
   timestamp: string
+  /** LEGACY: the old single note, overwritten by each save. Read-only now. */
   notes: string
+  /** The append-only journal that replaced it — one dated entry per update. */
+  workNotes: WorkNote[]
   /** Why the ticket ended — required to resolve, carried through to closed. */
   closureCode: ClosureCode | null
   /** The specifics behind the code — optional free text. */
@@ -171,7 +181,8 @@ interface TicketSheetProps {
   saving: boolean
   /** `undefined` = not mid-resolve; `code: ''` = armed, none picked yet. */
   pending: { code: ClosureCode | ''; note: string } | undefined
-  notes: string
+  /** The update being typed — unsaved until ADD UPDATE is pressed. */
+  draftNote: string
   closureNote: string
   onClose: () => void
   onStatusChange: (status: Status) => void
@@ -182,19 +193,23 @@ interface TicketSheetProps {
   onClosureCodeChange: (code: ClosureCode) => void
   onClosureNoteChange: (note: string) => void
   onSaveClosureNote: () => void
-  onNotesChange: (notes: string) => void
-  onSaveNotes: () => void
+  onDraftNoteChange: (note: string) => void
+  onAddWorkNote: () => void
+  onClearLegacyNotes: () => void
 }
 
 function TicketSheet({
-  sub, now, saving, pending, notes, closureNote,
+  sub, now, saving, pending, draftNote, closureNote,
   onClose, onStatusChange, onArmResolve, onPendingChange, onConfirmResolve,
   onCancelResolve, onClosureCodeChange, onClosureNoteChange, onSaveClosureNote,
-  onNotesChange, onSaveNotes,
+  onDraftNoteChange, onAddWorkNote, onClearLegacyNotes,
 }: TicketSheetProps) {
   const resolving = pending !== undefined
   const carriesClosure = takesClosureCode(sub.status)
   const daysLeft = sub.status === 'resolved' ? daysUntilAutoClose(sub.resolvedAt, now) : null
+  // Newest first: the last thing that happened is the thing you came for.
+  const journal = sortWorkNotesNewestFirst(sub.workNotes)
+  const legacyNotes = (sub.notes ?? '').trim()
 
   // Choosing "resolved" reveals the closure controls further down the sheet;
   // on a phone they land below the fold, so bring them to you.
@@ -425,23 +440,62 @@ function TicketSheet({
             )}
           </div>
 
-          {/* 3 — your own working notes, last because they're private. */}
+          {/* 3 — the running story of the ticket, last because it's private.
+              Append-only: each update is its own dated entry, so a week of
+              work reads back as a timeline instead of one overwritten box. */}
           <div className="ticket-section">
-            <div className="pixel-font ticket-section-title">INTERNAL NOTES</div>
+            <div className="pixel-font ticket-section-title">WORK NOTES</div>
             <div className="ticket-field">
               <textarea
                 className="form-textarea"
-                value={notes}
-                onChange={e => onNotesChange(e.target.value)}
-                placeholder="notes visible only to you..."
+                value={draftNote}
+                maxLength={WORK_NOTE_MAX}
+                onChange={e => onDraftNoteChange(e.target.value)}
+                placeholder="what you found, what you tried, what's next..."
               />
               <div className="ticket-action-row">
-                <span className="retro-font ticket-hint">never leaves the console</span>
-                <button className="form-submit" onClick={onSaveNotes} disabled={saving}>
-                  {saving ? '...' : 'SAVE'}
+                <span className="retro-font ticket-hint">
+                  {draftNote.trim()
+                    ? `${draftNote.length}/${WORK_NOTE_MAX}`
+                    : 'each update is kept, stamped with the time'}
+                </span>
+                <button
+                  className="form-submit"
+                  onClick={onAddWorkNote}
+                  disabled={saving || !draftNote.trim()}
+                  style={{ opacity: draftNote.trim() ? 1 : 0.4 }}
+                >
+                  {saving ? '...' : 'ADD UPDATE'}
                 </button>
               </div>
             </div>
+
+            {journal.length > 0 && (
+              <div className="work-note-list">
+                {journal.map(note => (
+                  <div className="work-note" key={`${note.at}-${note.text.slice(0, 24)}`}>
+                    <span className="retro-font work-note-at">{formatWorkNoteAt(note.at)}</span>
+                    <div className="retro-font work-note-text">{note.text}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Text from before the journal existed. Shown so nothing is
+                lost, read-only because it has no date to sit under — clear
+                it once you've moved anything worth keeping into an update. */}
+            {legacyNotes && (
+              <div className="ticket-field">
+                <span className="retro-font ticket-label">EARLIER NOTES (BEFORE WORK NOTES)</span>
+                <div className="retro-font ticket-message">{legacyNotes}</div>
+                <div className="ticket-action-row">
+                  <span className="retro-font ticket-hint">undated — the old single-note field</span>
+                  <button className="retro-font ticket-btn" onClick={onClearLegacyNotes} disabled={saving}>
+                    clear
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -464,7 +518,9 @@ export default function Admin() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   // The ticket whose detail sheet is up, by ref — `null` when none is.
   const [openRef, setOpenRef] = useState<string | null>(null)
-  const [editNotes, setEditNotes] = useState<Record<string, string>>({})
+  // Work-note drafts, per ticket — typed but not yet appended. Kept while
+  // the sheet is closed and reopened so a half-written update survives.
+  const [draftWorkNote, setDraftWorkNote] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
   // Refs the user has ticked for bulk actions.
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -498,15 +554,13 @@ export default function Admin() {
         ...s,
         status: normaliseStatus(s.status),
         closureCode: isClosureCode(s.closureCode) ? s.closureCode : null,
+        // Absent on tickets logged before the journal existed, and dropped
+        // entirely if the stored shape is anything but {at, text}.
+        workNotes: normaliseWorkNotes(s.workNotes),
       })))
       setNow(Date.now())
-      const notes: Record<string, string> = {}
       const closureNotes: Record<string, string> = {}
-      data.forEach(s => {
-        notes[s.ref] = s.notes ?? ''
-        closureNotes[s.ref] = s.closureNote ?? ''
-      })
-      setEditNotes(notes)
+      data.forEach(s => { closureNotes[s.ref] = s.closureNote ?? '' })
       setEditClosureNote(closureNotes)
     } catch {
       setError('Failed to load submissions.')
@@ -703,16 +757,55 @@ export default function Admin() {
     }
   }
 
-  async function saveNotes(ref: string) {
+  /**
+   * Appends one dated entry to a ticket's journal. Nothing already there is
+   * touched — the Worker stamps the time and returns the stored entry, which
+   * goes straight into the local row so the timeline updates without a
+   * refetch. The draft is only cleared once the append actually landed.
+   */
+  async function addWorkNote(ref: string) {
+    const text = (draftWorkNote[ref] ?? '').trim()
+    if (!text) return
     setSaving(ref)
     const pw = sessionStorage.getItem('admin-pw')!
-    await fetch(`${API}/admin/submissions/${ref}`, {
+    const res = await fetch(`${API}/admin/submissions/${ref}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
-      body: JSON.stringify({ notes: editNotes[ref] }),
+      body: JSON.stringify({ workNote: text }),
     })
-    setSubmissions(s => s.map(sub => sub.ref === ref ? { ...sub, notes: editNotes[ref] } : sub))
     setSaving(null)
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      setError(body.error ?? `Could not add the update to ${ref}.`)
+      return
+    }
+    const body = (await res.json().catch(() => ({}))) as { workNote?: WorkNote | null }
+    // Fall back to a local stamp only if the response somehow lacks one —
+    // the row would otherwise show an update with no date against it.
+    const note = body.workNote ?? { at: new Date().toISOString(), text }
+    setError('')
+    setSubmissions(s => s.map(sub =>
+      sub.ref === ref ? { ...sub, workNotes: [...sub.workNotes, note] } : sub,
+    ))
+    setDraftWorkNote(d => ({ ...d, [ref]: '' }))
+  }
+
+  /** Drops the pre-journal single note once its contents have been read. */
+  async function clearLegacyNotes(ref: string) {
+    setSaving(ref)
+    const pw = sessionStorage.getItem('admin-pw')!
+    const res = await fetch(`${API}/admin/submissions/${ref}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-admin-password': pw },
+      body: JSON.stringify({ notes: '' }),
+    })
+    setSaving(null)
+    if (!res.ok) {
+      setError(`Could not clear the earlier notes on ${ref}.`)
+      return
+    }
+    setError('')
+    setSubmissions(s => s.map(sub => (sub.ref === ref ? { ...sub, notes: '' } : sub)))
   }
 
   function setFilter(key: ColKey, value: string) {
@@ -1166,7 +1259,7 @@ export default function Admin() {
           now={now}
           saving={saving === openSub.ref}
           pending={pendingResolve[openSub.ref]}
-          notes={editNotes[openSub.ref] ?? ''}
+          draftNote={draftWorkNote[openSub.ref] ?? ''}
           closureNote={editClosureNote[openSub.ref] ?? ''}
           onClose={() => setOpenRef(null)}
           onStatusChange={status => {
@@ -1183,8 +1276,9 @@ export default function Admin() {
           onClosureCodeChange={code => updateClosureCode(openSub.ref, code)}
           onClosureNoteChange={note => setEditClosureNote(n => ({ ...n, [openSub.ref]: note }))}
           onSaveClosureNote={() => saveClosureNote(openSub.ref)}
-          onNotesChange={notes => setEditNotes(n => ({ ...n, [openSub.ref]: notes }))}
-          onSaveNotes={() => saveNotes(openSub.ref)}
+          onDraftNoteChange={note => setDraftWorkNote(d => ({ ...d, [openSub.ref]: note }))}
+          onAddWorkNote={() => addWorkNote(openSub.ref)}
+          onClearLegacyNotes={() => clearLegacyNotes(openSub.ref)}
         />
       )}
     </main>

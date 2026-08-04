@@ -1,5 +1,7 @@
 import { getAccessToken } from './auth'
-import { createSubmission, listSubmissions, updateSubmission, SubmissionUpdate } from './firestore'
+import {
+  appendWorkNote, createSubmission, listSubmissions, updateSubmission, SubmissionUpdate,
+} from './firestore'
 import { sendConfirmation, sendAdminNotification } from './email'
 import { getTrigram, APP_NAMES } from './trigrams'
 import { WIDGET_JS } from './widget'
@@ -8,6 +10,7 @@ import {
   AUTO_CLOSE_DAYS, SELECTABLE_CLOSURE_CODES, SETTABLE_STATUSES,
   isClosureCode, isStatus, normaliseClosureNote,
 } from '../../lib/status'
+import { WORK_NOTE_MAX, WorkNote, normaliseWorkNoteText } from '../../lib/worknotes'
 
 export interface Env {
   GOOGLE_SERVICE_ACCOUNT_JSON: string
@@ -83,7 +86,9 @@ export default {
         const ref = await createSubmission(env.FIRESTORE_PROJECT_ID, token, trigram, {
           appId, trigram, type: type ?? 'general', status: 'new',
           name: name.trim(), email: email?.trim() ?? '', message: message.trim(),
-          timestamp: new Date(), notes: '',
+          // `workNotes` starts empty and only ever grows (see ./firestore.ts
+          // `appendWorkNote`); `notes` is the legacy single-string field.
+          timestamp: new Date(), notes: '', workNotes: [],
           closureCode: null, closureNote: null,
           resolvedAt: null, closedAt: null, autoClosed: null,
         })
@@ -153,18 +158,34 @@ export default {
     // Status transitions are policed here: `closed` is not settable — a
     // ticket is marked `resolved` and closes itself AUTO_CLOSE_DAYS later
     // (see ./sweep.ts), which leaves a window to test the fix.
+    //
+    // Body fields: `status`, `closureCode`, `closureNote` (the outcome),
+    // `workNote` (one dated entry appended to the journal) and the legacy
+    // `notes` string. Any combination is allowed in one request.
     if (request.method === 'PATCH' && url.pathname.startsWith('/admin/submissions/')) {
       try {
         const ref = url.pathname.split('/').pop()!
         const body = (await request.json()) as {
-          status?: string; notes?: string; closureCode?: string; closureNote?: string
+          status?: string; notes?: string; workNote?: string
+          closureCode?: string; closureNote?: string
         }
         const patch: SubmissionUpdate = {}
         const bad = (error: string) => new Response(JSON.stringify({ error }), {
           status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
         })
 
+        // The legacy single-string note. The console no longer writes into it
+        // — it sends `workNote` instead — but the field stays patchable so
+        // old text can still be cleared once it's been read.
         if (body.notes !== undefined) patch.notes = String(body.notes)
+
+        // One entry for the append-only journal. Nothing already in the list
+        // is touched, so there's no "edit" or "delete" counterpart by design:
+        // an update that's wrong is corrected by adding another.
+        const workNote = body.workNote === undefined ? '' : normaliseWorkNoteText(body.workNote)
+        if (body.workNote !== undefined && !workNote) {
+          return bad(`A work note needs some text (up to ${WORK_NOTE_MAX} characters).`)
+        }
 
         // A closure code (or note) on its own is how you correct the "why" of
         // an already-resolved (or closed) ticket without touching its status
@@ -210,19 +231,34 @@ export default {
           patch.autoClosed = null
         }
 
-        if (patch.status === undefined && patch.notes === undefined
-          && patch.closureCode === undefined && patch.closureNote === undefined) {
+        const hasFieldPatch = patch.status !== undefined || patch.notes !== undefined
+          || patch.closureCode !== undefined || patch.closureNote !== undefined
+        if (!hasFieldPatch && !workNote) {
           return bad('Nothing to update')
         }
 
         const token = await authToken(env)
-        await updateSubmission(env.FIRESTORE_PROJECT_ID, token, ref, patch)
+        if (hasFieldPatch) {
+          await updateSubmission(env.FIRESTORE_PROJECT_ID, token, ref, patch)
+        }
+        // The journal entry is a separate, atomic append — and it's stamped
+        // here rather than in the browser, so the times on a ticket are one
+        // clock's, whatever device the update was typed on.
+        let appended: WorkNote | null = null
+        if (workNote) {
+          const at = new Date()
+          await appendWorkNote(env.FIRESTORE_PROJECT_ID, token, ref, { at, text: workNote })
+          appended = { at: at.toISOString(), text: workNote }
+        }
         return new Response(JSON.stringify({
           success: true,
           status: patch.status,
           closureCode: patch.closureCode,
           // Echoed back trimmed/capped, so the UI shows what was stored.
           closureNote: patch.closureNote,
+          // The stored entry (server timestamp included), so the console can
+          // render it straight away without refetching the whole list.
+          workNote: appended,
           // Lets the dashboard show the auto-close countdown without a refetch.
           resolvedAt: patch.resolvedAt instanceof Date ? patch.resolvedAt.toISOString() : null,
         }), {

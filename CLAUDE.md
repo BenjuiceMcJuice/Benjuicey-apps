@@ -52,6 +52,12 @@ email. Full write-up: **`docs/feedback-how-it-works.md`**; rules/schema:
   **requires** a `closureCode` (`fixed`, `wont-fix`,
   `duplicate`, …) in the same request, with an optional free-text `closureNote`
   for the specifics. Rules: `docs/feedback-how-it-works.md`.
+- **Work notes are append-only: `lib/worknotes.ts`** — also imported by both
+  ends. A ticket's `workNotes` is a list of `{at, text}` entries; `PATCH
+  /admin/submissions/:ref` with `workNote` **adds** one (server-stamped, via a
+  Firestore `appendMissingElements` transform) and never rewrites the list.
+  There is no edit or delete path, by design. The old single-string `notes`
+  field is legacy — read-only in the console, kept only so old text survives.
 - **The Worker deploys itself** via `.github/workflows/deploy-worker.yml` on any
   push to `main` touching `worker/**` or `lib/**` (also dispatchable from the
   Actions tab). Don't tell Ben to run `wrangler deploy` by hand — merging is the
